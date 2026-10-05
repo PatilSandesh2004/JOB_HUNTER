@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JobPilot — Modular AI Job Search & Autonomous Application Agent</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="dark-theme">
+
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+        <div class="logo-container">
+            <div class="logo-icon">
+                <i class="fa-solid fa-paper-plane"></i>
+            </div>
+            <div class="logo-text">
+                <span class="brand-name">JobPilot</span>
+                <span class="brand-badge">GO + AI MICROSERVICES</span>
+            </div>
+        </div>
+
+        <nav class="nav-links">
+            <button class="nav-btn active" data-tab="search-tab"><i class="fa-solid fa-magnifying-glass"></i> Job Discovery</button>
+            <button class="nav-btn" data-tab="approval-tab">
+                <i class="fa-solid fa-user-check"></i> Approval Queue
+                <span class="badge-count" id="pending-count">1</span>
+            </button>
+            <button class="nav-btn" data-tab="candidate-tab"><i class="fa-solid fa-id-card"></i> Candidate Profile</button>
+            <button class="nav-btn" data-tab="system-tab"><i class="fa-solid fa-server"></i> System Health</button>
+        </nav>
+
+        <div class="user-profile">
+            <div class="avatar">JD</div>
+            <div class="user-info">
+                <span class="user-name">John Doe</span>
+                <span class="user-role">Senior AI Engineer</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-container">
+
+        <!-- TAB 1: JOB DISCOVERY & MATCHING -->
+        <section id="search-tab" class="tab-content active">
+            <div class="hero-card">
+                <div class="hero-content">
+                    <h1>Modular Autonomous Job Search & Smart Matching</h1>
+                    <p>Go Backend coordinates multi-search agents, visa evaluation, normalized listings, and candidate fit.</p>
+                </div>
+
+                <form id="search-form" class="search-box-group">
+                    <div class="input-field">
+                        <i class="fa-solid fa-briefcase"></i>
+                        <input type="text" id="role-input" value="AI Engineer, Software Engineer" placeholder="Target Roles">
+                    </div>
+
+                    <div class="input-field">
+                        <i class="fa-solid fa-location-dot"></i>
+                        <input type="text" id="location-input" value="Bengaluru, Remote" placeholder="Locations">
+                    </div>
+
+                    <div class="toggle-field">
+                        <label class="switch">
+                            <input type="checkbox" id="remote-toggle" checked>
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="toggle-label">Remote Only</span>
+                    </div>
+
+                    <button type="submit" id="btn-search" class="btn-primary">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Execute Agent Search
+                    </button>
+                </form>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon purple"><i class="fa-solid fa-briefcase"></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-total-jobs">2</span>
+                        <span class="stat-label">Jobs Discovered</span>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon green"><i class="fa-solid fa-bullseye"></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-high-match">2</span>
+                        <span class="stat-label">High Match (&gt;70%)</span>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon cyan"><i class="fa-solid fa-passport"></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-visa-jobs">2</span>
+                        <span class="stat-label">Visa Sponsoring</span>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-icon amber"><i class="fa-solid fa-clock"></i></div>
+                    <div class="stat-data">
+                        <span class="stat-value" id="stat-pending-apps">1</span>
+                        <span class="stat-label">Awaiting Approval</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-header">
+                <h2><i class="fa-solid fa-list-check"></i> Matched Job Feed</h2>
+            </div>
+
+            <div id="jobs-container" class="jobs-grid">
+                <!-- Populated dynamically via JS Modules -->
+            </div>
+        </section>
+
+        <!-- TAB 2: APPROVAL QUEUE -->
+        <section id="approval-tab" class="tab-content">
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-shield-halved"></i> Human-in-the-Loop Approval Queue</h2>
+                    <p>Playwright agent has auto-filled these application forms. Approve to complete submission.</p>
+                </div>
+
+                <div id="approval-queue-list" class="approval-list">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: CANDIDATE PROFILE -->
+        <section id="candidate-tab" class="tab-content">
+            <div class="candidate-grid">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <h2><i class="fa-solid fa-user-gear"></i> Candidate Profile</h2>
+                    </div>
+
+                    <form id="candidate-form" class="form-layout">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Full Name</label>
+                                <input type="text" id="cand-name" value="John Doe">
+                            </div>
+                            <div class="form-group">
+                                <label>Email Address</label>
+                                <input type="email" id="cand-email" value="john.doe@example.com">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Years of Experience</label>
+                                <input type="number" step="0.5" id="cand-exp" value="4.0">
+                            </div>
+                            <div class="form-group">
+                                <label>Visa Sponsorship Required?</label>
+                                <select id="cand-visa">
+                                    <option value="true" selected>Yes - Requires Sponsorship</option>
+                                    <option value="false">No - Authorized</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save Profile</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: SYSTEM HEALTH -->
+        <section id="system-tab" class="tab-content">
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-network-wired"></i> Microservices Architecture Status</h2>
+                </div>
+
+                <div class="health-grid">
+                    <div class="health-card">
+                        <div class="health-status online"></div>
+                        <div class="health-info">
+                            <h4>Go Core Backend</h4>
+                            <span>http://localhost:8080</span>
+                        </div>
+                        <span class="status-pill status-online">ONLINE (Go 1.22)</span>
+                    </div>
+
+                    <div class="health-card">
+                        <div class="health-status online"></div>
+                        <div class="health-info">
+                            <h4>Python AI Microservice</h4>
+                            <span>http://localhost:8000</span>
+                        </div>
+                        <span class="status-pill status-online">ONLINE (FastAPI + LangGraph)</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

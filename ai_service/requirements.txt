@@ -1,0 +1,20 @@
+# ============================================================
+# JOBPILOT - AI MICROSERVICE (PYTHON)
+# ============================================================
+
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+httpx
+aiohttp
+langgraph
+langchain
+langchain-core
+langchain-community
+playwright
+qdrant-client
+sqlalchemy
+asyncpg
+aiosqlite
+python-multipart
