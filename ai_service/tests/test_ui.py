@@ -38,6 +38,7 @@ async def ui(client, tmp_path):
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
         page = await browser.new_page()
+        page.set_default_timeout(15_000)  # fail fast instead of hanging on a blocked click
         # Stay offline: fonts and icons come from CDNs; the app itself must not need them.
         await page.route(
             "**/*", lambda route: route.continue_() if route.request.url.startswith(base) else route.abort()
@@ -145,3 +146,51 @@ async def test_token_prompt_unlocks_the_ui(ui, monkeypatch):
     await expect(page.locator("#profile-tab")).to_have_class("tab-content active")
     assert await page.evaluate("localStorage.getItem('jobpilot.apiToken')") == "s3cret"
     assert ui.errors == [] or all("401" in e for e in ui.errors)
+
+
+async def test_hiding_and_job_sources_in_the_browser(ui, tmp_path):
+    import httpx
+
+    from ai_service.app.api import deps
+    from ai_service.app.services.search.board_source import BoardSearchSource
+
+    def lever(request: httpx.Request) -> httpx.Response:
+        if "api.lever.co/v0/postings/acme" in str(request.url):
+            return httpx.Response(200, json=[{"text": "AI Engineer", "hostedUrl": "https://jobs.lever.co/acme/1"}])
+        return httpx.Response(404)
+
+    boards = BoardSearchSource(tmp_path / "boards.json", transport=httpx.MockTransport(lever), seeds={})
+    app.dependency_overrides[deps.get_board_source] = lambda: boards
+    page, client = ui.page, ui.client
+    await client.post("/api/v1/candidates/me/resume", files={"file": ("cv.txt", RESUME, "text/plain")})
+    await client.post("/api/v1/search", json={"roles": ["Backend Engineer"], "strict_location": False})
+
+    await page.goto(ui.base)
+    acme = page.locator(".job-card", has_text="Acme")
+    await expect(acme).to_have_count(1)
+
+    # Not interested, then Undo.
+    await acme.locator("[data-action=hide-job]").click()
+    await expect(acme).to_have_count(0)
+    await page.locator(".toast-action").click()
+    await expect(acme).to_have_count(1)
+
+    # Hide a whole company (confirm dialog), reflected in the profile.
+    page.once("dialog", lambda dialog: asyncio.ensure_future(dialog.accept()))
+    remote_first = page.locator(".job-card", has_text="Remote First Inc")
+    await remote_first.locator("[data-action=block-company]").click()
+    await expect(remote_first).to_have_count(0)
+    await expect(page.locator("#p-blocked")).to_have_value("Remote First Inc")
+
+    # System tab: inbox not configured in tests; watch and unwatch a company.
+    await page.click("[data-tab=system-tab]")
+    await expect(page.locator("#inbox-status")).to_contain_text("Not set up")
+    await expect(page.locator("#btn-check-inbox")).to_be_hidden()
+    await page.fill("#board-url", "https://jobs.lever.co/acme")
+    await page.click("#board-form button[type=submit]")
+    await expect(page.locator(".board-row")).to_contain_text("Acme")
+    await expect(page.locator(".toast").last).to_contain_text("Watching Acme (1 open job right now)")
+    await page.locator("[data-action=remove-board]").click()
+    await expect(page.locator(".board-row")).to_have_count(0)
+
+    assert ui.errors == []

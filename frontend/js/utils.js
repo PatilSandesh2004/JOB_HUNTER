@@ -34,14 +34,23 @@ export function timeAgo(iso) {
     return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-export function toast(message, kind = 'info') {
+/** Show a toast. `action` ({label, onClick}) adds a button such as "Undo" and keeps the toast up longer. */
+export function toast(message, kind = 'info', action = null) {
     const container = document.getElementById('toasts');
     const el = document.createElement('div');
     el.className = `toast toast-${kind}`;
     el.textContent = message;
+    if (action) {
+        const button = document.createElement('button');
+        button.className = 'toast-action';
+        button.textContent = action.label;
+        button.addEventListener('click', () => { el.remove(); action.onClick(); }, { once: true });
+        el.appendChild(button);
+    }
     container.appendChild(el);
-    setTimeout(() => el.classList.add('leaving'), 4200);
-    setTimeout(() => el.remove(), 4600);
+    const visibleMs = action ? 8000 : 4200;
+    setTimeout(() => el.classList.add('leaving'), visibleMs);
+    setTimeout(() => el.remove(), visibleMs + 400);
 }
 
 export function setBusy(button, busy, busyLabel) {

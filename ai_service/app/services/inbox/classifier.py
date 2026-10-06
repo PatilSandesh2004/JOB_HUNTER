@@ -1,4 +1,4 @@
-"""Classify employer emails into application status updates.
+"""Classify employer emails into application status updates (used by the inbox reader).
 
 Rejections are checked first because they often reuse interview vocabulary
 ("we will not be moving forward to the interview stage").

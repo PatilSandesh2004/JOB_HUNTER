@@ -182,6 +182,8 @@
                             <div class="form-group"><label for="p-notice">Notice period / start date</label><input id="p-notice" placeholder="e.g. 30 days, or Immediately"></div>
                         </div>
                         <p class="muted small">Used only to answer those questions on application forms. Leave blank to answer them yourself.</p>
+                        <div class="form-group"><label for="p-blocked">Hidden companies (comma separated)</label>
+                            <input id="p-blocked" placeholder="Companies whose jobs you never want to see"></div>
                         <label class="checkbox-row"><input type="checkbox" id="p-relocate"> Willing to relocate</label>
                         <label class="checkbox-row" title="A PDF built from this profile, leading with the skills each posting asks for. Nothing is invented; you can download and check it on the application.">
                             <input type="checkbox" id="p-tailor"> Attach a resume tailored to each job (instead of the uploaded one)</label>
@@ -231,6 +233,27 @@
                     <p>Refreshes every time you open this tab.</p>
                 </div>
                 <div class="health-grid" id="health-grid"></div>
+            </div>
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-building"></i> Company watchlist</h2>
+                    <p>Companies whose whole job board is searched on every search, through their public job API.
+                       Paste any job or careers link from Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee or Personio.</p>
+                </div>
+                <form id="board-form" class="answer-add board-add">
+                    <input id="board-url" placeholder="https://jobs.lever.co/company" required maxlength="500">
+                    <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Watch company</button>
+                </form>
+                <div id="board-list" class="board-list"></div>
+            </div>
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-envelope-open-text"></i> Job-alert inbox</h2>
+                    <p>Adds the jobs from your LinkedIn, Indeed and Naukri job-alert emails, and moves applications forward when a company replies
+                       ("received your application", interview invitations, rejections).</p>
+                </div>
+                <div id="inbox-status"></div>
+                <button type="button" class="btn-secondary" id="btn-check-inbox"><i class="fa-solid fa-envelope"></i> Check now</button>
             </div>
             <div class="card-panel">
                 <div class="panel-header">

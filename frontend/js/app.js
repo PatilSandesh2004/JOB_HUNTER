@@ -2,6 +2,7 @@ import { api, auth, setToken } from './api.js';
 import { renderApplications } from './components/approvalQueue.js';
 import { renderHealth } from './components/health.js';
 import { renderJobFeed } from './components/jobFeed.js';
+import { renderBoards, renderInbox } from './components/sources.js';
 import { fillProfileForm, readProfileForm, renderAnswers, renderNavbar } from './components/profile.js';
 import { AWAITING, IN_FLIGHT, NEEDS_REVIEW, SUBMITTED, store } from './state.js';
 import { closeModal, esc, openModal, setBusy, splitList, toast } from './utils.js';
@@ -74,7 +75,10 @@ function announce(app) {
 function showTab(tabId) {
     document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tabId));
     document.querySelectorAll('.tab-content').forEach((c) => c.classList.toggle('active', c.id === tabId));
-    if (tabId === 'system-tab') loadHealth();
+    if (tabId === 'system-tab') {
+        loadHealth();
+        loadSources();
+    }
 }
 
 document.querySelectorAll('.nav-btn').forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
@@ -159,6 +163,9 @@ document.addEventListener('click', async (e) => {
     if (action === 'step-screenshot') return showImage('Agent screenshot', api.stepScreenshotUrl(appId, target.dataset.name));
     if (action === 'open-resume') return openPdf(api.tailoredResumeUrl(appId));
     if (action === 'update-answer' || action === 'delete-answer') return editAnswer(target, action);
+    if (action === 'hide-job') return hideJob(target.dataset.jobId);
+    if (action === 'block-company') return blockCompany(target.dataset.company);
+    if (action === 'remove-board') return removeBoard(target);
     if (action === 'dismiss-modal') return closeModal();
     if (action === 'copy-letter') return copyLetter(appId);
     if (action === 'manual') return startManualApply(target);
@@ -204,6 +211,99 @@ document.addEventListener('click', async (e) => {
         toast(err.message, 'error');
     } finally {
         setBusy(target, false);
+    }
+});
+
+// ---------------------------------------------------------------- not interested / hidden companies
+async function hideJob(jobId) {
+    try {
+        await api.hideJob(jobId);
+        store.set({ jobs: store.state.jobs.filter((j) => j.job.id !== jobId) });
+        toast('Hidden. It will not come back in later searches.', 'info', {
+            label: 'Undo',
+            onClick: async () => {
+                await api.unhideJob(jobId);
+                store.set({ jobs: await api.listJobs() });
+            },
+        });
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function setBlockedCompanies(blocked) {
+    const profile = store.state.profile;
+    const saved = await api.saveProfile({ ...profile, preferences: { ...profile.preferences, blocked_companies: blocked } });
+    store.set({ profile: saved, jobs: await api.listJobs() });
+    fillProfileForm(saved);
+}
+
+async function blockCompany(company) {
+    if (!store.state.profile) return toast('Set up your profile first', 'warn');
+    if (!confirm(`Hide every job from ${company}? You can undo this in Profile → Hidden companies.`)) return;
+    const before = store.state.profile.preferences.blocked_companies || [];
+    try {
+        await setBlockedCompanies([...before, company]);
+        toast(`Jobs from ${company} are hidden`, 'info', { label: 'Undo', onClick: () => setBlockedCompanies(before) });
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// ---------------------------------------------------------------- job sources (System tab)
+async function loadSources() {
+    try {
+        const [boards, inbox] = await Promise.all([api.listBoards(), api.inboxStatus()]);
+        renderBoards($('board-list'), boards);
+        renderInbox($('inbox-status'), inbox);
+        $('btn-check-inbox').hidden = !inbox.configured;
+    } catch (err) {
+        toast(`Could not load job sources: ${err.message}`, 'error');
+    }
+}
+
+$('board-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = e.submitter || $('board-form').querySelector('button');
+    setBusy(button, true, 'Checking…');
+    try {
+        const board = await api.addBoard($('board-url').value.trim());
+        $('board-form').reset();
+        toast(`Watching ${board.company} (${board.open_jobs} open job${board.open_jobs === 1 ? '' : 's'} right now)`, 'success');
+        await loadSources();
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        setBusy(button, false);
+    }
+});
+
+async function removeBoard(button) {
+    try {
+        await api.removeBoard(button.dataset.ats, button.dataset.slug);
+        await loadSources();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+$('btn-check-inbox').addEventListener('click', async () => {
+    const button = $('btn-check-inbox');
+    setBusy(button, true, 'Reading inbox…');
+    try {
+        const report = await api.checkInbox();
+        if (report.errors.length) {
+            toast(report.errors[0], 'error');
+        } else {
+            toast(`${report.job_alerts} alert email(s): ${report.jobs_new} new job(s); ${report.status_updates.length} application update(s)`, 'success');
+        }
+        const [jobs, applications] = await Promise.all([api.listJobs(), api.listApplications()]);
+        store.set({ jobs, applications });
+        await loadSources();
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
+        setBusy(button, false);
     }
 });
 

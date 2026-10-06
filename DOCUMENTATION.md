@@ -53,10 +53,12 @@ makes searches more resilient.
    extraction. Review the fields, then set target roles, locations, work arrangement, sponsorship need,
    and optionally your expected salary and notice period (used only to answer those form questions).
    Saving re-scores all stored jobs.
-2. **Discover**: search. Queries are expanded by the LLM and targeted at ATS sites (Greenhouse, Lever,
-   Ashby, Workable). Progress is shown live, stage by stage. Every result is normalised, de-duplicated,
-   verified with the job board where possible, scored, and stored. Stored jobs are re-checked every
-   12 hours, and postings that have closed are hidden.
+2. **Discover**: search. Queries are expanded by the LLM and sent to every job source (see
+   [Where jobs come from](#where-jobs-come-from)). Progress is shown live, stage by stage. Every result is
+   normalised, de-duplicated, verified with the job board where possible, scored, and stored. Stored jobs
+   are re-checked every 12 hours, and postings that have closed are hidden. On any job card,
+   **Not interested** (eye icon) hides it for good, and **Hide company** (ban icon) hides every job from
+   that company; both can be undone (Profile → Hidden companies).
 3. **Prepare application**: the agent writes a cover letter and fills the form in headless Chromium.
    The application then appears in **Applications** as *Pending approval*, with screenshots, the list
    of filled fields, the questions it could not answer, and an **Agent activity** timeline of every step.
@@ -77,8 +79,36 @@ Each application also shows which of the posting's skills your profile covers an
 the tailored PDF can be downloaded from the application.
 
 Forms can be filled on Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee, Teamtailor,
-BambooHR and Personio. Other sites are *Apply manually*: JobPilot opens the site, drafts a letter to
-paste, and asks afterwards whether you applied.
+BambooHR and Personio. Other sites, including LinkedIn, Indeed, Naukri and Workday, are *Apply manually*:
+JobPilot opens the site, drafts a letter to paste, and asks afterwards whether you applied.
+
+### Where jobs come from
+
+Everything is open source and uses only public, documented interfaces or your own email. LinkedIn,
+Indeed and Naukri are never scraped or logged into.
+
+| Source | How | Applying |
+|---|---|---|
+| **Company job boards** | Public job APIs of Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee and Personio: a built-in list, boards seen in search results, and your **watchlist** (System tab → paste any job or careers link) | Auto-fill |
+| **Web search** (SearXNG) | ATS-targeted queries, plus `site:` queries for LinkedIn, Naukri and Indeed job pages (`SEARCH_JOB_SITES`) | Auto-fill on ATS sites; manual on job sites |
+| **Job-alert emails** | Set up alerts on LinkedIn, Indeed and Naukri; JobPilot reads those emails from your inbox (read-only IMAP) and adds the jobs | Manual |
+| **Remotive, Arbeitnow** | Their public APIs | Manual |
+
+**Job-alert inbox** (System tab): put `IMAP_USER` and `IMAP_PASSWORD` in `.env` (for Gmail, an *app
+password*: turn on 2-step verification, then Google Account → Security → App passwords) and restart. The
+inbox is checked every 30 minutes, or with **Check now**. It is opened read-only, so nothing is marked as
+read. Only alert emails and emails naming a company you applied to are downloaded; nothing about other
+emails is stored. Tracking links in alerts are followed (one request each, like a click) to find the job
+URL; set `INBOX_RESOLVE_TRACKING_LINKS=false` to skip that.
+
+The same check reads **replies from companies**. "We received your application", interview invitations
+and rejections move the application forward (*Applied*, *Interview*, *Rejected*) and are added to its
+activity timeline. To avoid mistakes, the company must appear in the email's sender or subject, exactly
+one of your applications must match, and a status never moves backwards. Set `INBOX_UPDATE_STATUSES=false`
+to turn this off.
+
+**Scheduled discovery**: set `DISCOVERY_INTERVAL_HOURS` (for example `6`) and your profile's search runs
+on its own; strong matches are sent to your webhook if one is set.
 
 ### What the agent will not do
 
@@ -119,9 +149,12 @@ Every endpoint except `/health` requires the API token when `API_TOKEN` is set
 | `GET /health` | Component status (database, SearXNG, LLM, Chromium). Through the gateway it also includes gateway and upstream status |
 | `POST /search` | `{roles, locations, remote_only, sponsorship_required, strict_location, max_results}` → ranked jobs (persisted) |
 | `POST /search/stream` | Same, as Server-Sent Events: `stage` events (`{stage, label, detail}`), then `result` (or `error`) |
-| `GET /jobs?limit&include_closed` | Stored jobs, best match first; closed postings hidden unless `include_closed=true` |
+| `GET /jobs?limit&include_closed&hidden` | Stored jobs, best match first; closed, hidden and blocked-company jobs left out (`hidden=true` lists the hidden ones) |
+| `POST /jobs/{id}/hide` · `POST /jobs/{id}/unhide` | Not interested / undo |
 | `POST /jobs/rescore` · `DELETE /jobs` | Re-score every stored job · delete jobs (those with an application are kept) |
 | `POST /jobs/recheck?limit&force` | Ask the job boards which stored postings are still open |
+| `GET /boards` · `POST /boards` · `DELETE /boards/{ats}/{slug}` | Company boards searched directly; `POST {url}` watches a company from any of its job links |
+| `GET /inbox` · `POST /inbox/check` | Job-alert inbox status · read new alert emails and company replies now |
 | `GET/PUT /candidates/me` · `POST /candidates/me/resume` | Profile and resume upload |
 | `GET /applications` · `POST /applications` | List; create `{job_id, mode: review\|auto\|manual, tailor_resume?}` (202, queued) |
 | `GET/PATCH /applications/{id}` | Read; edit `cover_letter` or set outcome `APPLIED/INTERVIEW/REJECTED/DISMISSED` |
@@ -160,7 +193,9 @@ ai_service/app/
                              skills catalogue, visa evidence, matching, resume parsing and tailoring,
                              cover letters, screening answers, applications, task runner, webhooks
   models/ schemas/ repositories/   SQLAlchemy models, Pydantic contracts, data access
-  workers/                   periodic discovery CLI, employer email classifier
+  integrations/mail/         read-only IMAP reader
+  services/inbox/            job-alert parsing, employer-email classifier, status matching
+  workers/                   periodic discovery CLI
 ai_service/migrations/       Alembic migrations (run automatically on startup)
 ai_service/tests/            pytest suite: unit, API, migrations, real-Chromium form filling, and UI tests
 backend/                     Go gateway: cmd/server, internal/config, internal/server (+ tests)
@@ -228,6 +263,11 @@ All settings are environment variables (see [.env.example](.env.example)). The m
 | `TASK_MAX_ATTEMPTS` | `3` | Attempts per form fill (submits are never retried after the click) |
 | `TASK_CONCURRENCY` | `3` | Background tasks run at once |
 | `JOB_RECHECK_INTERVAL_HOURS` | `12` | How often stored jobs are re-verified (`0` disables) |
+| `SEARCH_JOB_SITES` | LinkedIn, Naukri, Indeed | Job sites added as `site:` web searches (`[]` disables) |
+| `IMAP_USER`, `IMAP_PASSWORD` | (empty: off) | Job-alert inbox (Gmail: app password); also `IMAP_HOST`, `IMAP_FOLDER` |
+| `INBOX_CHECK_INTERVAL_MINUTES` | `30` | How often the inbox is read (`0`: only with Check now) |
+| `INBOX_UPDATE_STATUSES` | `true` | Move applications forward from company replies |
+| `DISCOVERY_INTERVAL_HOURS` | `0` (off) | Run your profile's search automatically |
 | `NOTIFICATION_WEBHOOK_URL`, `HIGH_MATCH_THRESHOLD` | (empty), `85` | Slack/Discord alerts for strong matches |
 
 The gateway reads `BIND_ADDR` (default `127.0.0.1`), `PORT` (default 8090), `AI_SERVICE_URL`,

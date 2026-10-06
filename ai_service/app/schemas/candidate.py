@@ -34,6 +34,7 @@ class CandidatePreferences(BaseModel):
     visa_sponsorship_required: bool = False
     expected_salary: str | None = None
     notice_period: str | None = None
+    blocked_companies: list[str] = Field(default_factory=list)  # never show jobs from these
     tailor_resume: bool = False  # attach a per-job tailored PDF instead of the uploaded resume
 
 

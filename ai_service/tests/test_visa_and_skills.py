@@ -2,9 +2,9 @@ import pytest
 
 from ai_service.app.schemas.application import ApplicationStatus
 from ai_service.app.schemas.job import VisaSponsorshipStatus
+from ai_service.app.services.inbox.classifier import classify_email
 from ai_service.app.services.skills.catalog import extract_skills, normalize_skill_list
 from ai_service.app.services.visa.visa_service import VisaIntelligenceService
-from ai_service.app.workers.email_tracker import classify_email
 
 visa = VisaIntelligenceService()
 

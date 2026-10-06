@@ -1,50 +1,21 @@
-"""Periodic job discovery for the active profile.
+"""Periodic job discovery for the active profile, as a standalone process.
 
 python -m ai_service.app.workers.job_worker --once
 python -m ai_service.app.workers.job_worker --interval 3600 --roles "AI Engineer" --locations Remote
+
+The AI service can do the same by itself: set DISCOVERY_INTERVAL_HOURS in .env.
 """
 
 import argparse
 import asyncio
 import logging
 
-from ai_service.app.api.deps import get_notifier, get_search_agent
+from ai_service.app.api.deps import get_discovery_service
 from ai_service.app.core.config import settings
 from ai_service.app.core.logging import configure_logging
-from ai_service.app.database.session import AsyncSessionLocal, init_db
-from ai_service.app.repositories.candidate_repository import CandidateRepository
-from ai_service.app.repositories.job_repository import JobRepository
-from ai_service.app.schemas.search import SearchQueryRequest
+from ai_service.app.database.session import init_db
 
 logger = logging.getLogger("jobpilot.worker")
-
-
-async def run_discovery_cycle(roles: list[str] | None, locations: list[str] | None, remote_only: bool) -> int:
-    async with AsyncSessionLocal() as session:
-        candidate = await CandidateRepository(session).get_active()
-        prefs = candidate.preferences if candidate else None
-        if not roles and prefs:
-            roles = prefs.preferred_roles or ([candidate.current_role] if candidate.current_role else [])
-        if not roles:
-            logger.error("No roles given and the profile has no preferred roles; nothing to search")
-            return 0
-        request = SearchQueryRequest(
-            roles=roles,
-            locations=locations or (prefs.preferred_locations if prefs else []),
-            remote_only=remote_only,
-            sponsorship_required=bool(prefs and prefs.visa_sponsorship_required),
-        )
-        response = await get_search_agent().run(request, candidate)
-        await JobRepository(session).upsert_many(response.results)
-        sent = await get_notifier().notify_high_matches(response.results)
-        logger.info(
-            "Discovery cycle: %d raw -> %d jobs stored, %d alerts sent, %d source errors",
-            response.total_raw,
-            response.total_results,
-            sent,
-            len(response.errors),
-        )
-        return response.total_results
 
 
 async def main() -> None:
@@ -58,9 +29,10 @@ async def main() -> None:
 
     configure_logging(settings.log_level)
     await init_db()
+    discovery = get_discovery_service()
     while True:
         try:
-            await run_discovery_cycle(args.roles, args.locations, args.remote_only)
+            await discovery.run_once(args.roles, args.locations, args.remote_only)
         except Exception:
             logger.exception("Discovery cycle failed")
         if args.once:

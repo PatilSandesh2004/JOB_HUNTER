@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     search_ats_targeting: bool = True
     search_enable_remotive: bool = True
     search_enable_arbeitnow: bool = True
+    # Job sites searched through SearXNG (site: queries for the leading query only, to limit engine load).
+    # Their postings are listed as "Apply manually": applying there needs your own login. [] disables.
+    search_job_sites: list[str] = Field(default_factory=lambda: ["linkedin.com/jobs/view", "naukri.com", "indeed.com"])
     external_api_timeout_seconds: float = 10.0
 
     # LLM (Groq)
@@ -73,9 +76,29 @@ class Settings(BaseSettings):
     job_recheck_interval_hours: float = 12.0
     job_recheck_batch_size: int = 40
 
+    # Job-alert inbox (read-only IMAP). Gmail: imap.gmail.com with an app password (Google account ->
+    # Security -> App passwords). Empty user/password disables it.
+    imap_host: str = "imap.gmail.com"
+    imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""
+    imap_folder: str = "INBOX"
+    inbox_lookback_days: int = 7
+    inbox_max_messages: int = 300
+    inbox_check_interval_minutes: float = 30.0  # 0 = only when you click "Check now"
+    inbox_update_statuses: bool = True  # move applications forward from employer emails
+    inbox_resolve_tracking_links: bool = True  # follow alert-email redirect links to find the job URL
+
+    # Run your profile's search automatically every N hours (0 = off)
+    discovery_interval_hours: float = 0.0
+
     # Matching & notifications
     high_match_threshold: float = 85.0
     notification_webhook_url: str = ""
+
+    @property
+    def inbox_enabled(self) -> bool:
+        return bool(self.imap_user and self.imap_password)
 
     @property
     def llm_enabled(self) -> bool:

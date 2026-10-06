@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ai_service.app.api.deps import get_application_service, get_task_runner
-from ai_service.app.api.routes import applications, candidates, health, jobs, screening, search
+from ai_service.app.api.routes import applications, boards, candidates, health, inbox, jobs, screening, search
 from ai_service.app.core.config import REPO_ROOT, settings
 from ai_service.app.core.errors import JobPilotError, LLMUnavailableError, NotFoundError, ResumeParseError
 from ai_service.app.core.logging import configure_logging
@@ -58,7 +58,7 @@ async def handle_domain_error(_: Request, exc: JobPilotError) -> JSONResponse:
 
 
 app.include_router(health.router, prefix=settings.api_v1_prefix)
-for module in (search, jobs, candidates, applications, screening):
+for module in (search, jobs, candidates, applications, screening, boards, inbox):
     app.include_router(module.router, prefix=settings.api_v1_prefix, dependencies=[Depends(require_token)])
 
 # The Go gateway is the primary UI host; serving it here too lets the AI service run standalone.

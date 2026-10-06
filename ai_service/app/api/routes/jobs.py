@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_service.app.api.deps import get_job_recheck_service
@@ -17,10 +17,29 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 async def list_jobs(
     limit: int = Query(200, ge=1, le=1000),
     include_closed: bool = Query(False, description="Also return postings the job board reported closed"),
+    hidden: bool = Query(False, description="Only the jobs you marked not interested"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Stored jobs, best match first."""
-    return await JobRepository(db).list_all(limit, include_closed)
+    """Stored jobs, best match first. Hidden jobs and companies you blocked are left out."""
+    return await JobRepository(db).list_all(limit, include_closed, await _blocked(db), hidden)
+
+
+@router.post("/{job_id}/hide", status_code=204)
+async def hide_job(job_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    """Not interested: hide this job now and in future search results."""
+    if not await JobRepository(db).set_hidden(job_id, True):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+
+
+@router.post("/{job_id}/unhide", status_code=204)
+async def unhide_job(job_id: str, db: AsyncSession = Depends(get_db)) -> None:
+    if not await JobRepository(db).set_hidden(job_id, False):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+
+
+async def _blocked(db: AsyncSession) -> list[str]:
+    candidate = await CandidateRepository(db).get_active()
+    return candidate.preferences.blocked_companies if candidate else []
 
 
 @router.post("/rescore", response_model=list[JobWithMatch])
@@ -34,7 +53,7 @@ async def rescore_jobs(limit: int = Query(200, ge=1, le=1000), db: AsyncSession 
             await repo.upsert_many(
                 [JobWithMatch(job=i.job, match=matcher.evaluate_match(candidate, i.job)) for i in batch]
             )
-    return await repo.list_all(limit)
+    return await repo.list_all(limit, blocked_companies=await _blocked(db))
 
 
 @router.post("/recheck")

@@ -57,7 +57,7 @@ function jobCard({ job, match }, application, hasProfile) {
             </div>
             <div class="job-tags">
                 ${workplace}${visaTag}${experience}
-                <span class="tag subtle">${esc(job.ats === 'other' || job.ats === 'aggregator' ? job.source : job.ats)}</span>
+                <span class="tag subtle">${esc(sourceLabel(job))}</span>
                 ${job.verified ? '<span class="tag verified" title="Title, location and description confirmed with the job board"><i class="fa-solid fa-circle-check"></i> Verified</span>' : ''}
             </div>
             ${skills ? `<div class="chip-row">${skills}</div>` : ''}
@@ -68,6 +68,17 @@ function jobCard({ job, match }, application, hasProfile) {
     </article>`;
 }
 
+const SITE_LABELS = { 'linkedin.com': 'linkedin', 'indeed.com': 'indeed', 'naukri.com': 'naukri' };
+
+/** Where the posting lives: the ATS, the job site, or the alert email it came from. */
+function sourceLabel(job) {
+    if (job.source?.startsWith('email_')) return `${job.source.slice(6)} alert`;
+    if (job.ats !== 'other' && job.ats !== 'aggregator') return job.ats;
+    const host = (() => { try { return new URL(job.application_url).hostname; } catch { return ''; } })();
+    const site = Object.keys(SITE_LABELS).find((domain) => host === domain || host.endsWith(`.${domain}`));
+    return site ? SITE_LABELS[site] : job.source;
+}
+
 export function manualButton(jobId, url, title, company, label = 'Apply manually') {
     return `<button class="btn-secondary btn-sm" data-action="manual" data-job-id="${esc(jobId)}"
                 data-url="${esc(safeUrl(url))}" data-title="${esc(title)}" data-company="${esc(company)}"
@@ -76,7 +87,20 @@ export function manualButton(jobId, url, title, company, label = 'Apply manually
             </button>`;
 }
 
+/** "Not interested" and "hide this company" controls, shown on jobs you have not applied to. */
+function hideButtons(job) {
+    return `<span class="hide-controls">
+        <button class="btn-ghost btn-sm" data-action="hide-job" data-job-id="${esc(job.id)}" title="Not interested: hide this job" aria-label="Not interested"><i class="fa-solid fa-eye-slash"></i></button>
+        <button class="btn-ghost btn-sm" data-action="block-company" data-company="${esc(job.company)}" title="Hide every job from ${esc(job.company)}" aria-label="Hide company"><i class="fa-solid fa-ban"></i></button>
+    </span>`;
+}
+
 function footer(job, application, hasProfile) {
+    if (!application) return `${hideButtons(job)}<span class="footer-actions">${footerActions(job, hasProfile)}</span>`;
+    return footerActions(job, hasProfile, application);
+}
+
+function footerActions(job, hasProfile, application = null) {
     if (application) {
         return `<span class="status-pill status-${esc(application.status.toLowerCase())}">${esc(statusLabel(application.status))}</span>
                 <button class="btn-secondary btn-sm" data-action="goto-applications">View application</button>`;

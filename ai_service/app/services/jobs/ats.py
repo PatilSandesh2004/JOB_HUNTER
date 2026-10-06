@@ -65,6 +65,11 @@ AGGREGATOR_HOSTS = (
 )
 _LISTING_PATH_RE = re.compile(r"/(search|jobs/search|job-search)\b|[-/]jobs/?$|/jobs/[\w-]*-jobs/?$", re.I)
 
+# Single-job pages on aggregators: LinkedIn /jobs/view/<id>, Indeed /viewjob?jk=, Naukri /job-listings-<slug>-<id>.
+_AGGREGATOR_POSTING_RE = re.compile(
+    r"/jobs/view/|viewjob|/job-listings-[\w-]+|/remote-jobs/[\w-]+/[\w-]+-\d+|/jobs/[\w-]+-\d+$"
+)
+
 ATS_SEARCH_SITES = ("greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com", "apply.workable.com")
 
 
@@ -98,7 +103,7 @@ def detect_ats(url: str) -> AtsInfo:
         return AtsInfo(name, match.group(1), match.group(2), True, host)
     if any(agg in host for agg in AGGREGATOR_HOSTS):
         # Aggregator pages are kept as postings only when they point at a single job.
-        single = bool(re.search(r"/jobs/view/|viewjob|/remote-jobs/[\w-]+/[\w-]+-\d+|/jobs/[\w-]+-\d+$", path))
+        single = bool(_AGGREGATOR_POSTING_RE.search(path))
         return AtsInfo("aggregator", None, None, single and not _LISTING_PATH_RE.search(path), host)
     looks_like_posting = bool(re.search(r"/(jobs?|careers?|positions?|openings?|vacanc(y|ies))/[\w-]+", path, re.I))
     return AtsInfo("other", None, None, looks_like_posting and not _LISTING_PATH_RE.search(path), host)

@@ -1,7 +1,8 @@
 from ai_service.app.models.application import ApplicationModel
 from ai_service.app.models.candidate import CandidateModel
+from ai_service.app.models.inbox_message import InboxMessageModel
 from ai_service.app.models.job import JobModel
 from ai_service.app.models.screening_answer import ScreeningAnswerModel
 from ai_service.app.models.task import TaskModel
 
-__all__ = ["ApplicationModel", "CandidateModel", "JobModel", "ScreeningAnswerModel", "TaskModel"]
+__all__ = ["ApplicationModel", "CandidateModel", "InboxMessageModel", "JobModel", "ScreeningAnswerModel", "TaskModel"]

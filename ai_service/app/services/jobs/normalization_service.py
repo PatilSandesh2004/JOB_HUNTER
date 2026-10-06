@@ -27,8 +27,19 @@ _NOISE_PARTS = {
     "job application",
     "apply",
     "job board",
+    "linkedin.com",
+    "indeed.com",
+    "naukri.com",
+    "job details",
 }
 _GREENHOUSE_TITLE = re.compile(r"^job application for (?P<title>.+?) at (?P<company>.+)$", re.I)
+# LinkedIn search-result titles: "Acme hiring Senior AI Engineer in Bengaluru, Karnataka, India | LinkedIn".
+_LINKEDIN_TITLE = re.compile(
+    r"^(?P<company>.+?) hiring (?P<title>.+?)(?: in (?P<location>[^|]+?))?\s*(?:[|\-–—]\s*LinkedIn)?\s*$", re.I
+)
+# LinkedIn job URLs carry the company: /jobs/view/<title-slug>-at-<company-slug>-<id>
+_LINKEDIN_SLUG = re.compile(r"/jobs/view/(?P<title>[\w%-]+?)-at-(?P<company>[\w%-]+?)-\d{6,}/?$")
+_ELLIPSIS = re.compile(r"\s*(\.\.\.|…)\s*$")
 _TITLE_SEPARATORS = re.compile(r"\s+[-–—|@·]\s+|\s+at\s+", re.I)
 _COMPANY_SUFFIX = re.compile(r"\s+(careers?|jobs|job board|hiring)\s*$", re.I)
 
@@ -57,7 +68,11 @@ class JobNormalizationService:
         title, company = self._title_and_company(raw, ats.company_slug)
         text = f"{title}\n{raw.snippet}\n{' '.join(raw.tags)}"
         workplace = WorkplaceType(raw.workplace) if raw.workplace else self._workplace(text, raw.remote)
-        location = raw.location or self._location_from_hints(text, location_hints or [])
+        location = (
+            raw.location
+            or _title_location(raw.title, ats.name)
+            or self._location_from_hints(text, location_hints or [])
+        )
 
         return NormalizedJob(
             id=str(uuid.uuid5(JOB_ID_NAMESPACE, raw.url.split("?")[0].rstrip("/"))),
@@ -88,6 +103,8 @@ class JobNormalizationService:
         greenhouse = _GREENHOUSE_TITLE.match(page_title)
         if greenhouse:
             return greenhouse.group("title").strip(), raw.company or _clean_company(greenhouse.group("company"))
+        if "linkedin." in raw.url:
+            return _linkedin_title_and_company(raw)
 
         parts = [p.strip() for p in _TITLE_SEPARATORS.split(page_title)]
         parts = [p for p in parts if p and p.lower() not in _NOISE_PARTS]
@@ -133,6 +150,43 @@ class JobNormalizationService:
     def _experience(text: str) -> float | None:
         values = [int(m.group(1)) for m in _EXPERIENCE_RE.finditer(text) if 0 < int(m.group(1)) <= 25]
         return float(min(values)) if values else None
+
+
+def _linkedin_title_and_company(raw: RawJobPosting) -> tuple[str, str]:
+    """LinkedIn titles come as 'Company hiring Title in City | LinkedIn' or 'Title - Company - LinkedIn'.
+
+    The URL's '<title>-at-<company>-<id>' slug is the most reliable company source; the page title gives
+    the nicer spelling ('C5i' rather than 'C5i'.title()) when both agree.
+    """
+    page_title = raw.title.strip()
+    slug = _LINKEDIN_SLUG.search(raw.url.split("?")[0])
+    slug_company = slug_to_company(slug.group("company")) if slug else None
+    hiring = _LINKEDIN_TITLE.match(page_title)
+    if hiring:
+        title, company = hiring.group("title").strip(), hiring.group("company").strip()
+    else:
+        parts = [p.strip() for p in _TITLE_SEPARATORS.split(page_title)]
+        parts = [p for p in parts if p and p.lower() not in _NOISE_PARTS] or [page_title]
+        at = next((i for i, p in enumerate(parts) if slug_company and _squash(p) == _squash(slug_company)), None)
+        if at:  # everything before the company is the title, e.g. "Junior AI Engineer - Backend Python - Acme"
+            title, company = " - ".join(parts[:at]), parts[at]
+        else:
+            title, company = parts[0], parts[1] if len(parts) > 1 and len(parts[1]) <= 60 else "Unknown company"
+    if raw.company:
+        return title, raw.company
+    if slug_company and _squash(company) != _squash(slug_company):
+        company = slug_company
+    return title, company
+
+
+def _title_location(page_title: str, ats_name: str) -> str | None:
+    """Location stated in an aggregator page title ('... hiring X in Bengaluru, India | LinkedIn')."""
+    if ats_name != "aggregator":
+        return None
+    match = _LINKEDIN_TITLE.match(page_title.strip())
+    if not match or not match.group("location"):
+        return None
+    return _ELLIPSIS.sub("", match.group("location")).strip(" ,") or None
 
 
 def _clean_company(name: str) -> str:

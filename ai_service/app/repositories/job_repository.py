@@ -39,14 +39,41 @@ class JobRepository:
         row = await self.session.get(JobModel, job_id)
         return to_schema(row).job if row else None
 
-    async def list_all(self, limit: int = 200, include_closed: bool = False) -> list[JobWithMatch]:
-        """Best matches first (unscored last), then most recently seen."""
+    async def list_all(
+        self,
+        limit: int = 200,
+        include_closed: bool = False,
+        blocked_companies: list[str] | None = None,
+        hidden: bool = False,
+    ) -> list[JobWithMatch]:
+        """Best matches first (unscored last), then most recently seen.
+
+        Hidden jobs and companies you blocked are left out; `hidden=True` lists only the hidden jobs.
+        """
         stmt = select(JobModel).order_by(
             JobModel.overall_match.is_(None), JobModel.overall_match.desc(), JobModel.updated_at.desc()
         )
+        stmt = stmt.where(JobModel.hidden_at.is_not(None) if hidden else JobModel.hidden_at.is_(None))
         if not include_closed:
             stmt = stmt.where(JobModel.closed_at.is_(None))
+        blocked = [c.strip().lower() for c in blocked_companies or [] if c.strip()]
+        if blocked and not hidden:
+            stmt = stmt.where(func.lower(JobModel.company).not_in(blocked))
         return [to_schema(row) for row in (await self.session.scalars(stmt.limit(limit))).all()]
+
+    async def set_hidden(self, job_id: str, hidden: bool) -> bool:
+        row = await self.session.get(JobModel, job_id)
+        if row is None:
+            return False
+        row.hidden_at = datetime.now(UTC) if hidden else None
+        await self.session.commit()
+        return True
+
+    async def hidden_ids(self, ids: list[str]) -> set[str]:
+        if not ids:
+            return set()
+        stmt = select(JobModel.id).where(JobModel.id.in_(ids), JobModel.hidden_at.is_not(None))
+        return set((await self.session.scalars(stmt)).all())
 
     async def iter_batches(self, size: int = 200) -> AsyncIterator[list[JobWithMatch]]:
         """Every stored job, in batches, so large stores are never loaded at once."""
@@ -78,7 +105,7 @@ def _to_columns(item: JobWithMatch) -> dict:
     return data
 
 
-_NOT_IN_SCHEMA = {"match", "overall_match", "last_checked_at"}
+_NOT_IN_SCHEMA = {"match", "overall_match", "last_checked_at", "hidden_at"}
 
 
 def to_schema(row: JobModel) -> JobWithMatch:

@@ -29,7 +29,9 @@ async def search_jobs(
     """Discover, normalise, de-duplicate and rank jobs against the active profile, then persist them."""
     candidate = await CandidateRepository(db).get_active()
     response = await agent.run(request, candidate)
-    await JobRepository(db).upsert_many(response.results, checked=True)
+    repo = JobRepository(db)
+    await repo.upsert_many(response.results, checked=True)
+    _drop_hidden(response, await repo.hidden_ids([r.job.id for r in response.results]))
     await notifier.notify_high_matches(response.results)
     return response
 
@@ -56,7 +58,9 @@ async def search_jobs_stream(
                     yield _sse("stage", item.model_dump_json())
                     continue
                 async with AsyncSessionLocal() as session:
-                    await JobRepository(session).upsert_many(item.results, checked=True)
+                    repo = JobRepository(session)
+                    await repo.upsert_many(item.results, checked=True)
+                    _drop_hidden(item, await repo.hidden_ids([r.job.id for r in item.results]))
                 await notifier.notify_high_matches(item.results)
                 yield _sse("result", item.model_dump_json())
         except Exception as exc:
@@ -66,6 +70,15 @@ async def search_jobs_stream(
     # X-Accel-Buffering stops reverse proxies (nginx) from holding events back.
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
+
+
+def _drop_hidden(response: SearchResponse, hidden: set[str]) -> None:
+    """Jobs you marked "not interested" stay stored (so they stay hidden) but are not shown again."""
+    if not hidden:
+        return
+    response.results = [r for r in response.results if r.job.id not in hidden]
+    response.total_results = len(response.results)
+    response.filtered_out["not interested"] = len(hidden)
 
 
 def _sse(event: str, data: str) -> str:

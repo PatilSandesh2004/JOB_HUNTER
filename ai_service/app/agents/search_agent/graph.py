@@ -260,6 +260,13 @@ class SearchAgent:
         removed["unrelated role"] += len(jobs) - len(kept)
         jobs = kept
 
+        candidate = state.get("candidate")
+        blocked = {c.strip().lower() for c in (candidate.preferences.blocked_companies if candidate else []) if c}
+        if blocked:
+            kept = [j for j in jobs if j.company.strip().lower() not in blocked]
+            removed["company you hid"] += len(jobs) - len(kept)
+            jobs = kept
+
         if request.remote_only:
             kept = [j for j in jobs if j.workplace_type in (WorkplaceType.REMOTE, WorkplaceType.UNKNOWN)]
             removed["not remote"] += len(jobs) - len(kept)

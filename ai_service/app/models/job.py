@@ -38,3 +38,5 @@ class JobModel(TimestampMixin, Base):
     # Set when the job board reports the posting gone; cleared if a search finds it open again.
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # You marked it "not interested": hidden from the list and from later search results.
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

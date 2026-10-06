@@ -132,6 +132,15 @@ export const api = {
     listJobs: () => request('/jobs'),
     rescoreJobs: () => request('/jobs/rescore', { method: 'POST' }),
     recheckJobs: () => request('/jobs/recheck?force=true', { method: 'POST' }),
+    hideJob: (id) => request(`/jobs/${encodeURIComponent(id)}/hide`, { method: 'POST' }),
+    unhideJob: (id) => request(`/jobs/${encodeURIComponent(id)}/unhide`, { method: 'POST' }),
+
+    // Company job boards searched directly (watchlist), and the job-alert inbox.
+    listBoards: () => request('/boards'),
+    addBoard: (url) => request('/boards', { method: 'POST', body: { url } }),
+    removeBoard: (ats, slug) => request(`/boards/${encodeURIComponent(ats)}/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
+    inboxStatus: () => request('/inbox'),
+    checkInbox: () => request('/inbox/check', { method: 'POST' }),
 
     getProfile: () => request('/candidates/me'),
     saveProfile: (profile) => request('/candidates/me', { method: 'PUT', body: profile }),

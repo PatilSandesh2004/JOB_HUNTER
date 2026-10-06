@@ -877,3 +877,30 @@ button:disabled { opacity: 0.6; cursor: wait; transform: none !important; }
 @media (max-width: 640px) {
     .answer-add, .answer-row { grid-template-columns: 1fr; }
 }
+
+/* `hidden` must win over component display rules (e.g. .btn-secondary's inline-flex, .badge-count). */
+[hidden] { display: none !important; }
+/* Anything scrolled into view (keyboard focus, links) lands below the sticky navbar, not under it. */
+html { scroll-padding-top: 6rem; }
+@media (max-width: 1024px) { html { scroll-padding-top: 9rem; } }
+
+/* ------------------------------------------------------------------ hiding, job sources */
+.hide-controls { display: inline-flex; gap: 0.25rem; }
+.hide-controls .btn-ghost { padding: 0.4rem 0.55rem; }
+.footer-actions { display: inline-flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+.toast-action {
+    margin-left: 0.75rem; background: none; border: 1px solid currentColor; border-radius: var(--radius-sm);
+    color: inherit; font: inherit; font-weight: 700; padding: 0.15rem 0.6rem; cursor: pointer;
+}
+.board-add { grid-template-columns: 1fr auto; }
+.board-list h5 { font-size: 0.85rem; margin: 0.5rem 0; color: var(--text-muted); }
+.board-row {
+    display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+    padding: 0.35rem 0; border-bottom: 1px solid var(--border-color); font-size: 0.9rem;
+}
+.board-group { margin: 0.75rem 0; }
+.board-group summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
+.setup-steps { margin: 0.75rem 0 0.5rem 1.2rem; font-size: 0.85rem; color: var(--text-muted); display: grid; gap: 0.35rem; }
+.inbox-recent { list-style: none; margin: 0.75rem 0; padding: 0; display: grid; gap: 0.3rem; font-size: 0.85rem; }
+.inbox-recent .when { color: var(--text-dim); font-family: var(--font-mono); font-size: 0.75rem; margin-right: 0.35rem; }
+#btn-check-inbox { margin-top: 0.75rem; }

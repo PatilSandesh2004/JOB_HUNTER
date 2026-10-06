@@ -84,6 +84,8 @@ class SearchService:
             # Site-scoped variants only for the leading queries, to stay under engine rate limits.
             leading = queries[: self.MAX_ATS_TARGETED_QUERIES]
             expanded += [f"{q} site:{site}" for q in leading for site in ATS_SEARCH_SITES]
+        # Job sites (LinkedIn, Naukri, Indeed): read from search results only; the sites are never scraped.
+        expanded += [f"{q} site:{site}" for q in queries[:1] for site in self.config.search_job_sites]
         return list(dict.fromkeys(expanded))
 
     async def _searxng_query(self, query: str, client: httpx.AsyncClient) -> list[RawJobPosting]:

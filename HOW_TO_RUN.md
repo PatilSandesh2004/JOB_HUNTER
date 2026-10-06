@@ -112,6 +112,32 @@ Docker uses its own PostgreSQL database, separate from the local SQLite one in `
 
 If the page asks for an **access token**, enter the `API_TOKEN` from your `.env`.
 
+On any job card: the **eye icon** hides a job you're not interested in, and the **ban icon** hides
+every job from that company (undo from the toast, or in Profile → Hidden companies).
+
+---
+
+## Optional: more job sources
+
+**Watch companies** (System tab → Company watchlist): paste any job or careers link from Greenhouse,
+Lever, Ashby, Workable, SmartRecruiters, Recruitee or Personio, e.g. `https://jobs.lever.co/cred`.
+That company's whole job board is searched from then on.
+
+**Jobs from LinkedIn / Indeed / Naukri alerts** (read from your own email, read-only):
+
+1. On LinkedIn, Indeed and/or Naukri, create job alerts sent to your email.
+2. Gmail: turn on **2-step verification**, then create an **app password**
+   (Google Account → Security → App passwords). Copy the 16-character password.
+3. In `.env`:
+   ```text
+   IMAP_USER=you@gmail.com
+   IMAP_PASSWORD=your-16-char-app-password
+   ```
+4. Restart JobPilot. The System tab → **Job-alert inbox** shows the status; click **Check now** or wait
+   (it checks every 30 minutes). Replies from companies you applied to also update those applications.
+
+**Automatic searches**: set `DISCOVERY_INTERVAL_HOURS=6` in `.env` to run your profile's search every 6 hours.
+
 ---
 
 ## Run the tests
@@ -134,5 +160,8 @@ cd backend; go test ./...; cd ..                   # Go gateway tests
 | UI keeps asking for the token | The token must match `API_TOKEN` in `.env`; restart after changing `.env`. |
 | `docker compose` says "Set POSTGRES_PASSWORD" | Add `POSTGRES_PASSWORD` and `SEARXNG_SECRET` to `.env`. |
 | LLM shows DOWN on the System tab | Set a valid `GROQ_API_KEY` in `.env` and restart. The app still works without it. |
+| Inbox: "Login failed … app password" | Use a Gmail **app password**, not your normal password (needs 2-step verification). |
+| Inbox finds alerts but 0 jobs | Alert layouts change; check the alerts are from LinkedIn/Indeed/Naukri and contain job links. Open an issue with the email's layout. |
+| "Watch company" says the link isn't supported | Only Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee and Personio boards can be watched. |
 
 More detail (features, API, configuration): see [DOCUMENTATION.md](DOCUMENTATION.md).
