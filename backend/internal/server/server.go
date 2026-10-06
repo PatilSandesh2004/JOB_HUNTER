@@ -44,7 +44,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
-	mux.Handle("/api/", s.apiProxy())
+	mux.Handle("/api/", withAPIToken(s.cfg.APIToken, s.apiProxy()))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.cfg.FrontendDir))))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join(s.cfg.FrontendDir, "index.html"))

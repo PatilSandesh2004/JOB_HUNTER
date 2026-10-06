@@ -2,19 +2,27 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
-COPY ai_service/requirements.txt ./requirements.txt
-RUN pip install -r requirements.txt \
+# Runtime dependencies, pinned by the constraints file (regenerate with scripts/lock_deps.py).
+COPY ai_service/requirements.txt ai_service/constraints.txt ./
+RUN pip install -r requirements.txt -c constraints.txt \
     && python -m playwright install --with-deps chromium
 
+COPY alembic.ini ./
 COPY ai_service/ ./ai_service/
 COPY frontend/ ./frontend/
 
+# Run as an unprivileged user; only the data volume is writable.
+RUN useradd --create-home --uid 10001 app \
+    && mkdir -p /app/data \
+    && chown -R app:app /app/data
+USER app
+
 ENV DATA_DIR=/app/data
-RUN mkdir -p /app/data
 VOLUME ["/app/data"]
 
 EXPOSE 8000

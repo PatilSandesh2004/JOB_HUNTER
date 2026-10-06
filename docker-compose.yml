@@ -1,3 +1,5 @@
+# Ports are published on 127.0.0.1 only. The AI service and Postgres are reachable only inside
+# the compose network; everything goes through the gateway. Required in .env: POSTGRES_PASSWORD.
 services:
   # Web UI + API gateway -> http://localhost:8090
   gateway:
@@ -5,9 +7,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile.go
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
     environment:
       AI_SERVICE_URL: http://ai_service:8000
+      API_TOKEN: ${API_TOKEN:-}
     depends_on:
       - ai_service
     restart: unless-stopped
@@ -18,10 +21,8 @@ services:
       dockerfile: docker/Dockerfile.ai
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://jobpilot:jobpilot123@postgres:5432/jobpilot_db
+      DATABASE_URL: postgresql+asyncpg://jobpilot:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/jobpilot_db
       SEARXNG_URL: http://searxng:8080
-    ports:
-      - "8000:8000"
     volumes:
       - ai_data:/app/data
     depends_on:
@@ -35,7 +36,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: jobpilot
-      POSTGRES_PASSWORD: jobpilot123
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: jobpilot_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -49,10 +50,10 @@ services:
   searxng:
     image: searxng/searxng:latest
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     environment:
       SEARXNG_BASE_URL: http://localhost:8081/
-      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-to-a-random-string}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?Set SEARXNG_SECRET in .env}
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     restart: unless-stopped

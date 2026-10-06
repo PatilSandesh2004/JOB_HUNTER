@@ -31,4 +31,6 @@ async def rescore_jobs(db: AsyncSession = Depends(get_db)):
 
 @router.delete("", status_code=200)
 async def clear_jobs(db: AsyncSession = Depends(get_db)) -> dict[str, int]:
-    return {"deleted": await JobRepository(db).clear()}
+    """Delete stored jobs. Jobs you have an application for are kept so its history stays intact."""
+    deleted, kept = await JobRepository(db).clear()
+    return {"deleted": deleted, "kept": kept}

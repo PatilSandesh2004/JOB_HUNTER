@@ -22,6 +22,8 @@ export function fillProfileForm(profile) {
     $('p-remote').value = prefs.remote_preference || 'ANY';
     $('p-visa').value = String(Boolean(prefs.visa_sponsorship_required));
     $('p-relocate').checked = Boolean(prefs.willing_to_relocate);
+    $('p-salary').value = prefs.expected_salary || '';
+    $('p-notice').value = prefs.notice_period || '';
 
     $('skill-tags').innerHTML = (p.skills || []).map((s) => `<span class="skill-tag">${esc(s)}</span>`).join('')
         || '<span class="muted">None yet</span>';
@@ -53,6 +55,8 @@ export function readProfileForm(existing) {
             remote_preference: $('p-remote').value,
             visa_sponsorship_required: $('p-visa').value === 'true',
             willing_to_relocate: $('p-relocate').checked,
+            expected_salary: $('p-salary').value.trim() || null,
+            notice_period: $('p-notice').value.trim() || null,
         },
     };
 }

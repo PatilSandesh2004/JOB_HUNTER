@@ -26,7 +26,7 @@ func main() {
 	}
 
 	httpServer := &http.Server{
-		Addr:              ":" + cfg.Port,
+		Addr:              cfg.Addr(),
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      4 * time.Minute, // searches and form filling can take a while

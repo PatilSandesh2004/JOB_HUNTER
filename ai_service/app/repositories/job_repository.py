@@ -1,6 +1,7 @@
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_service.app.models.application import ApplicationModel
 from ai_service.app.models.job import JobModel
 from ai_service.app.schemas.job import NormalizedJob
 from ai_service.app.schemas.match import JobWithMatch, MatchResult
@@ -36,12 +37,13 @@ class JobRepository:
         items = [to_schema(row) for row in rows]
         return sorted(items, key=lambda i: i.match.overall_match if i.match else -1, reverse=True)
 
-    async def clear(self) -> int:
-        rows = (await self.session.scalars(select(JobModel))).all()
-        for row in rows:
-            await self.session.delete(row)
+    async def clear(self) -> tuple[int, int]:
+        """Delete stored jobs, keeping those an application refers to. Returns (deleted, kept)."""
+        referenced = select(ApplicationModel.job_id)
+        deleted = await self.session.execute(delete(JobModel).where(JobModel.id.not_in(referenced)))
         await self.session.commit()
-        return len(rows)
+        kept = await self.session.scalar(select(func.count()).select_from(JobModel))
+        return deleted.rowcount or 0, kept or 0
 
 
 def _to_columns(item: JobWithMatch) -> dict:

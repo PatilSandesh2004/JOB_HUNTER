@@ -197,9 +197,7 @@ class SearchAgent:
         return titles, queries
 
     async def search_sources(self, state: SearchAgentState) -> dict:
-        postings, errors = await self.search_service.search_many(
-            state["queries"], state["titles"], state["locations"]
-        )
+        postings, errors = await self.search_service.search_many(state["queries"], state["titles"], state["locations"])
         return {"raw_postings": postings, "errors": errors}
 
     async def verify_postings(self, state: SearchAgentState) -> dict:

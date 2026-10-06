@@ -1,5 +1,6 @@
-# Local development: runtime dependencies plus test & lint tooling.
+# Local development: runtime dependencies (pinned by the constraints file) plus test & lint tooling.
 -r ai_service/requirements.txt
+-c ai_service/constraints.txt
 
 pytest>=8.2
 pytest-asyncio>=0.23

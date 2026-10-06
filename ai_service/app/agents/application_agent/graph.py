@@ -37,6 +37,8 @@ def build_packet(candidate: CandidateProfile, cover_letter: str | None, resume_p
         current_company=candidate.current_company,
         current_role=candidate.current_role,
         years_of_experience=candidate.years_of_experience or None,
+        expected_salary=candidate.preferences.expected_salary,
+        notice_period=candidate.preferences.notice_period,
         cover_letter=cover_letter,
         resume_path=resume_path,
         requires_sponsorship=candidate.preferences.visa_sponsorship_required,

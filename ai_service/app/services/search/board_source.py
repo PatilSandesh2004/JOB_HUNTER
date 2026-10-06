@@ -25,9 +25,30 @@ logger = logging.getLogger("jobpilot.boards")
 # Verified 2026-10: boards with open roles in India (most in Bengaluru).
 SEED_BOARDS: dict[str, tuple[str, ...]] = {
     "greenhouse": (
-        "airbnb", "anthropic", "coinbase", "databricks", "datadog", "druva", "elastic", "figma", "fivetran",
-        "gitlab", "groww", "hackerrank", "mongodb", "newrelic", "observeai", "okta", "rubrik", "samsara",
-        "sigmoid", "stripe", "toast", "turing", "twilio", "zscaler",
+        "airbnb",
+        "anthropic",
+        "coinbase",
+        "databricks",
+        "datadog",
+        "druva",
+        "elastic",
+        "figma",
+        "fivetran",
+        "gitlab",
+        "groww",
+        "hackerrank",
+        "mongodb",
+        "newrelic",
+        "observeai",
+        "okta",
+        "rubrik",
+        "samsara",
+        "sigmoid",
+        "stripe",
+        "toast",
+        "turing",
+        "twilio",
+        "zscaler",
     ),
     "lever": ("cred", "fampay", "hevodata", "meesho", "mindtickle", "nium", "paytm", "pocketfm", "zeta"),
     "ashby": ("atlys", "composio", "elevenlabs", "harvey", "notion", "openai", "plane", "sarvam", "smallest", "writer"),
@@ -183,7 +204,8 @@ def _ashby(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
     if not url or not job.get("title") or job.get("isListed") is False:
         return None
     address = ((job.get("address") or {}).get("postalAddress")) or {}
-    places = [job.get("location"), address.get("addressCountry"), *[s.get("location") for s in job.get("secondaryLocations") or []]]
+    secondary = [s.get("location") for s in job.get("secondaryLocations") or []]
+    places = [job.get("location"), address.get("addressCountry"), *secondary]
     workplace = {"remote": "REMOTE", "hybrid": "HYBRID", "onsite": "ONSITE"}.get(str(job.get("workplaceType")).lower())
     return RawJobPosting(
         title=job["title"],

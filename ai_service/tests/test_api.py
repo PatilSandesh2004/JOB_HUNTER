@@ -49,7 +49,7 @@ async def client():
 
 async def test_full_application_flow(client):
     # 1. Applying before a profile exists is refused.
-    search = await client.post("/api/v1/search", json={"roles": ["AI Engineer"], "locations": ["Bengaluru"]})
+    search = await client.post("/api/v1/search", json={"roles": ["Backend Engineer"], "locations": ["Bengaluru"]})
     assert search.status_code == 200
     assert [r["job"]["company"] for r in search.json()["results"]] == ["Acme"]  # only the Bengaluru job
     job_id = search.json()["results"][0]["job"]["id"]
@@ -152,3 +152,30 @@ async def test_resume_upload_validation(client):
     assert bad.status_code == 400
     empty = await client.post("/api/v1/candidates/me/resume", files={"file": ("cv.txt", b" ", "text/plain")})
     assert empty.status_code == 422
+
+
+async def test_api_token_required_when_configured(client, monkeypatch):
+    from ai_service.app.core.config import settings
+
+    monkeypatch.setattr(settings, "api_token", "s3cret")
+    assert (await client.get("/api/v1/jobs")).status_code == 401
+    assert (await client.get("/api/v1/jobs", headers={"Authorization": "Bearer nope"})).status_code == 401
+    assert (await client.get("/api/v1/jobs", headers={"Authorization": "Bearer s3cret"})).status_code == 200
+    assert (await client.get("/api/v1/jobs", headers={"X-API-Token": "s3cret"})).status_code == 200
+    assert (await client.get("/api/v1/health")).status_code == 200  # stays public for monitoring
+
+
+async def test_clear_jobs_keeps_jobs_with_applications(client):
+    await client.post("/api/v1/candidates/me/resume", files={"file": ("cv.txt", RESUME, "text/plain")})
+    results = (
+        await client.post("/api/v1/search", json={"roles": ["Backend Engineer"], "strict_location": False})
+    ).json()["results"]
+    job_id = results[0]["job"]["id"]
+    app = (await client.post("/api/v1/applications", json={"job_id": job_id, "mode": "manual"})).json()
+
+    cleared = await client.delete("/api/v1/jobs")
+    assert cleared.status_code == 200
+    assert cleared.json()["deleted"] >= 1 and cleared.json()["kept"] >= 1
+    remaining = {j["job"]["id"] for j in (await client.get("/api/v1/jobs")).json()}
+    assert job_id in remaining
+    assert (await client.get(f"/api/v1/applications/{app['id']}")).status_code == 200

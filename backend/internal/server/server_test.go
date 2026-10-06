@@ -16,6 +16,11 @@ import (
 
 func newTestServer(t *testing.T, upstreamURL string) http.Handler {
 	t.Helper()
+	return newTestServerWith(t, config.Config{AIServiceURL: upstreamURL, CORSOrigins: []string{"*"}})
+}
+
+func newTestServerWith(t *testing.T, cfg config.Config) http.Handler {
+	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>JobPilot</h1>"), 0o644); err != nil {
 		t.Fatal(err)
@@ -23,8 +28,8 @@ func newTestServer(t *testing.T, upstreamURL string) http.Handler {
 	if err := os.WriteFile(filepath.Join(dir, "styles.css"), []byte("body{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := New(config.Config{AIServiceURL: upstreamURL, FrontendDir: dir, CORSOrigins: []string{"*"}},
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	cfg.FrontendDir = dir
+	srv, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,5 +103,67 @@ func TestServesFrontend(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("/nope: got %d", rec.Code)
+	}
+}
+
+func TestAPITokenRequired(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	h := newTestServerWith(t, config.Config{AIServiceURL: upstream.URL, APIToken: "s3cret"})
+
+	cases := []struct {
+		name   string
+		header map[string]string
+		want   int
+	}{
+		{"missing", nil, http.StatusUnauthorized},
+		{"wrong", map[string]string{"Authorization": "Bearer nope"}, http.StatusUnauthorized},
+		{"bearer", map[string]string{"Authorization": "Bearer s3cret"}, http.StatusOK},
+		{"header", map[string]string{"X-API-Token": "s3cret"}, http.StatusOK},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs", nil)
+		for k, v := range tc.header {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("%s: got %d, want %d (%s)", tc.name, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+
+	// Health and the UI stay reachable without the token so the login prompt can load.
+	for _, path := range []string{"/api/v1/health", "/"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s without token: got %d", path, rec.Code)
+		}
+	}
+}
+
+func TestStreamsServerSentEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, stage := range []string{"plan", "search"} {
+			_, _ = w.Write([]byte("event: stage\ndata: {\"stage\":\"" + stage + "\"}\n\n"))
+			w.(http.Flusher).Flush()
+		}
+	}))
+	defer upstream.Close()
+
+	gateway := httptest.NewServer(newTestServer(t, upstream.URL))
+	defer gateway.Close()
+	resp, err := http.Post(gateway.URL+"/api/v1/search/stream", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.Header.Get("Content-Type") != "text/event-stream" || strings.Count(string(body), "event: stage") != 2 {
+		t.Fatalf("unexpected stream: %q %q", resp.Header.Get("Content-Type"), body)
 	}
 }

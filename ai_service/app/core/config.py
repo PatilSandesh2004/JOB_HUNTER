@@ -23,7 +23,18 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api/v1"
     log_level: str = "INFO"
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # The UI is served same-origin by the gateway or this service, so only local origins need CORS.
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:8090",
+            "http://127.0.0.1:8090",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
+    )
+    # Shared secret for /api/v1/* (except /health). Empty disables the check; set it whenever the
+    # service is reachable by anyone but you. The gateway checks the same API_TOKEN.
+    api_token: str = ""
 
     # Storage
     database_url: str = f"sqlite+aiosqlite:///{(REPO_ROOT / 'data' / 'jobpilot.db').as_posix()}"

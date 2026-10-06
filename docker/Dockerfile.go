@@ -11,6 +11,7 @@ WORKDIR /app
 COPY --from=builder /out/gateway ./gateway
 COPY frontend/ ./frontend/
 USER app
-ENV PORT=8090 FRONTEND_DIR=/app/frontend
+# Listen on all interfaces inside the container; compose publishes the port on 127.0.0.1 only.
+ENV PORT=8090 BIND_ADDR=0.0.0.0 FRONTEND_DIR=/app/frontend
 EXPOSE 8090
 CMD ["./gateway"]

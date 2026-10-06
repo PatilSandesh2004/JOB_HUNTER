@@ -6,20 +6,41 @@ from ai_service.app.services.search.board_source import BoardSearchSource
 
 GREENHOUSE = {
     "jobs": [
-        {"title": "Senior Machine Learning Engineer", "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/1",
-         "location": {"name": "Bengaluru, India"}, "company_name": "Acme"},
-        {"title": "AI Engineer", "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/2",
-         "location": {"name": "San Francisco, CA"}, "company_name": "Acme"},
-        {"title": "Account Executive", "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/3",
-         "location": {"name": "Bangalore"}, "company_name": "Acme"},
-        {"title": "AI Engineer", "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/4",
-         "location": {"name": "Remote - India"}, "company_name": "Acme"},
+        {
+            "title": "Senior Machine Learning Engineer",
+            "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/1",
+            "location": {"name": "Bengaluru, India"},
+            "company_name": "Acme",
+        },
+        {
+            "title": "AI Engineer",
+            "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/2",
+            "location": {"name": "San Francisco, CA"},
+            "company_name": "Acme",
+        },
+        {
+            "title": "Account Executive",
+            "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/3",
+            "location": {"name": "Bangalore"},
+            "company_name": "Acme",
+        },
+        {
+            "title": "AI Engineer",
+            "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/4",
+            "location": {"name": "Remote - India"},
+            "company_name": "Acme",
+        },
     ]
 }
 LEVER = [
-    {"text": "Backend Engineer (Python)", "hostedUrl": "https://jobs.lever.co/beta/11111111-2222-3333-4444-555555555555",
-     "categories": {"location": "Bangalore", "allLocations": ["Bangalore"]}, "workplaceType": "hybrid",
-     "descriptionPlain": "FastAPI, PostgreSQL", "lists": []},
+    {
+        "text": "Backend Engineer (Python)",
+        "hostedUrl": "https://jobs.lever.co/beta/11111111-2222-3333-4444-555555555555",
+        "categories": {"location": "Bangalore", "allLocations": ["Bangalore"]},
+        "workplaceType": "hybrid",
+        "descriptionPlain": "FastAPI, PostgreSQL",
+        "lists": [],
+    },
 ]
 
 

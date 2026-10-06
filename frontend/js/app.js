@@ -1,4 +1,4 @@
-import { api } from './api.js';
+import { api, auth, setToken } from './api.js';
 import { renderApplications } from './components/approvalQueue.js';
 import { renderHealth } from './components/health.js';
 import { renderJobFeed } from './components/jobFeed.js';
@@ -142,9 +142,7 @@ document.addEventListener('click', async (e) => {
 
     if (action === 'goto-applications') return showTab('applications-tab');
     if (action === 'goto-profile') return showTab('profile-tab');
-    if (action === 'screenshot') {
-        return openModal('Form screenshot', `<img class="screenshot" alt="Application form screenshot" src="${esc(api.screenshotUrl(appId, target.dataset.version))}">`);
-    }
+    if (action === 'screenshot') return showImage('Form screenshot', api.screenshotUrl(appId));
     if (action === 'dismiss-modal') return closeModal();
     if (action === 'copy-letter') return copyLetter(appId);
     if (action === 'manual') return startManualApply(target);
@@ -189,6 +187,35 @@ document.addEventListener('click', async (e) => {
     } finally {
         setBusy(target, false);
     }
+});
+
+async function showImage(title, urlPromise) {
+    try {
+        const url = await urlPromise;
+        openModal(title, `<img class="screenshot" alt="${esc(title)}" src="${esc(url)}">`, {
+            onClose: () => URL.revokeObjectURL(url),
+        });
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// ---------------------------------------------------------------- access token
+auth.onUnauthorized = () => new Promise((resolve) => {
+    openModal('Access token required', `
+        <form id="token-form" class="form-layout">
+            <p class="muted">This JobPilot server is protected. Enter the <code>API_TOKEN</code> value from its <code>.env</code> file.</p>
+            <div class="form-group"><label for="token-input">API token</label>
+                <input id="token-input" type="password" autocomplete="current-password" required></div>
+            <div class="modal-footer"><button type="submit" class="btn-primary">Continue</button></div>
+        </form>`, { onClose: () => resolve(false) });
+    $('token-input').focus();
+    $('token-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        setToken($('token-input').value.trim());
+        resolve(true);
+        closeModal();
+    });
 });
 
 // ---------------------------------------------------------------- manual apply

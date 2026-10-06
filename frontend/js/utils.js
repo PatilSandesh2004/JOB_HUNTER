@@ -55,13 +55,20 @@ export function setBusy(button, busy, busyLabel) {
     }
 }
 
-export function openModal(title, bodyHtml) {
+let onModalClose = null;
+
+export function openModal(title, bodyHtml, { onClose } = {}) {
+    closeModal();
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHtml;
     document.getElementById('modal').classList.add('active');
+    onModalClose = onClose || null;
 }
 
 export function closeModal() {
     document.getElementById('modal').classList.remove('active');
     document.getElementById('modal-body').innerHTML = '';
+    const callback = onModalClose;
+    onModalClose = null;
+    callback?.();
 }

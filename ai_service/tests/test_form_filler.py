@@ -39,7 +39,10 @@ def packet(tmp_path) -> ApplicantPacket:
         ("q1 | Will you require visa sponsorship?", "select", "requires_sponsorship"),
         ("cover_letter | Cover Letter", "textarea", "cover_letter"),
         ("name | Full name", "text", "full_name"),
-        ("comp | What are your compensation requirements for this location?", "text", None),
+        ("comp | What are your compensation requirements for this location?", "text", "expected_salary"),
+        ("ctc | Expected CTC (INR)", "text", "expected_salary"),
+        ("np | Notice period", "text", "notice_period"),
+        ("city | What city are you located in?", "text", None),
     ],
 )
 def test_classify_field(descriptor, kind, expected):
@@ -105,3 +108,11 @@ async def test_page_without_form_needs_manual(packet, tmp_path):
         result = await fill_application(f"{site.base}/no-form", packet, submit=True, screenshot_path=tmp_path / "s.png")
     assert result.outcome == FillOutcome.NEEDS_MANUAL
     assert "No application form" in result.message
+
+
+async def test_fills_salary_from_profile(packet, tmp_path):
+    packet.expected_salary = "30 LPA"
+    with FixtureSite() as site:
+        await fill_application(f"{site.base}/apply", packet, submit=True, screenshot_path=tmp_path / "s.png")
+        body = site.submissions[0]
+    assert b'name="comp"\r\n\r\n30 LPA' in body

@@ -46,6 +46,8 @@ class ApplicantPacket:
     current_company: str | None = None
     current_role: str | None = None
     years_of_experience: float | None = None
+    expected_salary: str | None = None
+    notice_period: str | None = None
     cover_letter: str | None = None
     resume_path: str | None = None
     requires_sponsorship: bool | None = None
@@ -90,6 +92,19 @@ _FIELD_RULES: list[tuple[str, re.Pattern[str], set[str] | None]] = [
     ("current_company", re.compile(r"current (company|employer)|^\s*company\s*$|organi[sz]ation"), None),
     ("current_role", re.compile(r"current (job )?(title|role|position)"), None),
     ("years_of_experience", re.compile(r"years? of (professional |relevant )?experience|how many years"), None),
+    (
+        "expected_salary",
+        re.compile(
+            r"(salary|compensation|pay|ctc) (expectation|requirement|range)s?|"
+            r"(expected|desired) (salary|compensation|pay|ctc)|salary_expect|expected_ctc"
+        ),
+        None,
+    ),
+    (
+        "notice_period",
+        re.compile(r"notice.?period|when can you start|earliest (possible )?start|available to start"),
+        None,
+    ),
     ("requires_sponsorship", re.compile(r"(require|need).{0,40}sponsor|sponsorship"), {"select"}),
     ("location", re.compile(r"\blocation\b|\bcity\b|where are you (currently )?(based|located)"), None),
     ("full_name", re.compile(r"full.?name|^\s*name\s*\*?\s*$|your name|\bname\b"), None),

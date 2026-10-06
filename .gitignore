@@ -34,6 +34,7 @@ wheels/
 .installed.cfg
 *.egg
 .pytest_cache/
+.ruff_cache/
 
 # Go
 /backend/main
