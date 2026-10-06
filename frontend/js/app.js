@@ -2,7 +2,7 @@ import { api, auth, setToken } from './api.js';
 import { renderApplications } from './components/approvalQueue.js';
 import { renderHealth } from './components/health.js';
 import { renderJobFeed } from './components/jobFeed.js';
-import { fillProfileForm, readProfileForm, renderNavbar } from './components/profile.js';
+import { fillProfileForm, readProfileForm, renderAnswers, renderNavbar } from './components/profile.js';
 import { AWAITING, IN_FLIGHT, NEEDS_REVIEW, SUBMITTED, store } from './state.js';
 import { closeModal, esc, openModal, setBusy, splitList, toast } from './utils.js';
 
@@ -11,10 +11,16 @@ const POLL_MS = 3000;
 let pollTimer = null;
 
 // ---------------------------------------------------------------- rendering
+let renderedAnswers = null;
 store.subscribe((state) => {
     renderJobFeed($('jobs-container'), state);
     renderApplications($('applications-list'), state.applications);
     renderNavbar(state.profile);
+    // Only when the bank itself changed, so polling never wipes an answer being edited.
+    if (state.answers !== renderedAnswers) {
+        renderAnswers($('answer-list'), state.answers);
+        renderedAnswers = state.answers;
+    }
 
     $('stat-total').textContent = state.jobs.length;
     $('stat-high').textContent = state.jobs.filter((j) => j.match?.overall_match >= 70).length;
@@ -150,6 +156,9 @@ document.addEventListener('click', async (e) => {
     if (action === 'goto-applications') return showTab('applications-tab');
     if (action === 'goto-profile') return showTab('profile-tab');
     if (action === 'screenshot') return showImage('Form screenshot', api.screenshotUrl(appId));
+    if (action === 'step-screenshot') return showImage('Agent screenshot', api.stepScreenshotUrl(appId, target.dataset.name));
+    if (action === 'open-resume') return openPdf(api.tailoredResumeUrl(appId));
+    if (action === 'update-answer' || action === 'delete-answer') return editAnswer(target, action);
     if (action === 'dismiss-modal') return closeModal();
     if (action === 'copy-letter') return copyLetter(appId);
     if (action === 'manual') return startManualApply(target);
@@ -167,6 +176,7 @@ document.addEventListener('click', async (e) => {
             textarea.dataset.dirty = '0';
             return api.updateApplication(appId, { cover_letter: textarea.value });
         },
+        'save-answers': () => saveQuestionAnswers(target.closest('.app-card'), appId),
     };
     if (!handlers[action]) return;
 
@@ -184,6 +194,7 @@ document.addEventListener('click', async (e) => {
         await handlers[action]();
         if (action === 'prepare' || action === 'auto-apply') toast('Agent started: writing cover letter and filling the form', 'info');
         if (action === 'save-letter') toast('Cover letter saved', 'success');
+        if (action === 'save-answers') toast('Answers saved. The agent is filling the form again.', 'success');
         if (action === 'set-status') {
             const done = { APPLIED: 'Moved to Applied', DISMISSED: 'Dismissed', INTERVIEW: 'Marked as interview', REJECTED: 'Marked as rejected' };
             toast(done[target.dataset.status] || 'Updated', 'success');
@@ -195,6 +206,70 @@ document.addEventListener('click', async (e) => {
         setBusy(target, false);
     }
 });
+
+// ---------------------------------------------------------------- answers & resumes
+/** Save the answers typed on an application card to the answer bank, then re-fill that form. */
+async function saveQuestionAnswers(card, appId) {
+    const inputs = [...card.querySelectorAll('[data-question-input]')];
+    const answers = inputs
+        .filter((el) => el.value.trim())
+        .map((el) => ({
+            question: el.dataset.label,
+            answer: el.value.trim(),
+            source: el.value.trim() === el.dataset.suggestion ? 'suggested' : 'user',
+        }));
+    if (!answers.length) throw new Error('Answer at least one question first');
+    store.set({ answers: await api.saveAnswers(answers) });
+    inputs.forEach((el) => { el.dataset.dirty = '0'; });
+    return api.refillApplication(appId);
+}
+
+async function editAnswer(button, action) {
+    const row = button.closest('.answer-row');
+    setBusy(button, true, '');
+    try {
+        if (action === 'delete-answer') {
+            await api.deleteAnswer(button.dataset.answerId);
+            store.set({ answers: store.state.answers.filter((a) => a.id !== button.dataset.answerId) });
+            toast('Answer removed', 'success');
+        } else {
+            const input = row.querySelector('.answer-input');
+            store.set({ answers: await api.saveAnswers([{ question: input.dataset.question, answer: input.value }]) });
+            toast(input.value.trim() ? 'Answer saved' : 'Answer removed', 'success');
+        }
+    } catch (err) {
+        toast(err.message, 'error');
+        setBusy(button, false);
+    }
+}
+
+$('answer-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const question = $('answer-question').value.trim();
+    const answer = $('answer-text').value.trim();
+    if (!question || !answer) return;
+    try {
+        store.set({ answers: await api.saveAnswers([{ question, answer }]) });
+        $('answer-form').reset();
+        toast('Answer saved', 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+});
+
+function openPdf(urlPromise) {
+    // Open the tab inside the click (popup blockers allow that), then point it at the PDF once loaded.
+    const tab = window.open('', '_blank');
+    urlPromise
+        .then((url) => {
+            if (tab) tab.location.href = url;
+            else window.location.href = url;
+        })
+        .catch((err) => {
+            tab?.close();
+            toast(err.message, 'error');
+        });
+}
 
 async function showImage(title, urlPromise) {
     try {
@@ -370,8 +445,10 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal
 // ---------------------------------------------------------------- boot
 (async function boot() {
     try {
-        const [profile, jobs, applications] = await Promise.all([api.getProfile(), api.listJobs(), api.listApplications()]);
-        store.set({ profile, jobs, applications });
+        const [profile, jobs, applications, answers] = await Promise.all([
+            api.getProfile(), api.listJobs(), api.listApplications(), api.listAnswers(),
+        ]);
+        store.set({ profile, jobs, applications, answers });
         fillProfileForm(profile);
         prefillSearch(profile);
         if (!profile) showTab('profile-tab');

@@ -93,3 +93,26 @@ class RecordingFiller:
             result.submit_attempted = True
             return result
         return FillResult(FillOutcome.FILLED, {"Email": "email", "First Name": "first_name"})
+
+
+class FakePdfRenderer:
+    """Writes a stub PDF instead of launching Chromium."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def __call__(self, html, path):
+        self.calls.append(html)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4 tailored")
+        return path
+
+
+class FakeSuggester:
+    """ScreeningSuggester stand-in: answers questions whose label is in `answers`."""
+
+    def __init__(self) -> None:
+        self.answers: dict[str, str] = {}
+
+    async def suggest(self, questions, candidate, job):
+        return {q["label"]: self.answers[q["label"]] for q in questions if q["label"] in self.answers}

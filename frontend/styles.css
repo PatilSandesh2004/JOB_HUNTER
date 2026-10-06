@@ -829,3 +829,51 @@ button:disabled { opacity: 0.6; cursor: wait; transform: none !important; }
 .modal-question { font-size: 1rem; line-height: 1.6; margin-bottom: 0.5rem; }
 .modal-card .modal-footer { margin-top: 1rem; }
 .status-awaiting_confirmation { background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); }
+
+/* ------------------------------------------------------------------ answer bank, open questions, timeline */
+#profile-tab .card-panel + .card-panel, #system-tab .card-panel + .card-panel { margin-top: 1.5rem; }
+.answer-add { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; margin-bottom: 1rem; }
+.answer-add input, .answer-input, .question input, .question select, .question textarea {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-main);
+    font: inherit;
+    font-size: 0.9rem;
+}
+.answer-add input:focus, .answer-input:focus, .question :is(input, select, textarea):focus { outline: none; border-color: var(--primary); }
+.answer-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.answer-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto auto; gap: 0.5rem; align-items: center; }
+.answer-question { font-size: 0.85rem; color: var(--text-muted); overflow-wrap: anywhere; }
+
+.questions {
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.05);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.questions h5 { font-size: 0.9rem; color: var(--accent-amber); display: flex; gap: 0.4rem; align-items: center; }
+.question { display: flex; flex-direction: column; gap: 0.3rem; }
+.question label { font-size: 0.85rem; font-weight: 600; }
+.question-hint { font-size: 0.75rem; color: var(--accent-cyan); }
+
+.resume-report { gap: 0.4rem; }
+.timeline summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+.timeline ol { list-style: none; margin: 0.5rem 0 0; padding-left: 0.9rem; border-left: 2px solid var(--border-color); }
+.timeline li { font-size: 0.82rem; padding: 0.25rem 0 0.25rem 0.6rem; position: relative; overflow-wrap: anywhere; }
+.timeline li::before {
+    content: ''; position: absolute; left: -1.25rem; top: 0.6rem;
+    width: 8px; height: 8px; border-radius: 50%; background: var(--primary);
+}
+.timeline .when { color: var(--text-dim); font-family: var(--font-mono); font-size: 0.75rem; margin-right: 0.35rem; }
+.link-btn { background: none; border: none; color: var(--accent-cyan); cursor: pointer; font: inherit; font-size: 0.8rem; padding: 0 0.25rem; }
+.link-btn:hover { text-decoration: underline; }
+
+@media (max-width: 640px) {
+    .answer-add, .answer-row { grid-template-columns: 1fr; }
+}

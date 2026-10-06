@@ -28,7 +28,13 @@ from ai_service.app.schemas.candidate import CandidatePreferences, CandidateProf
 from ai_service.app.services.applications.application_service import ApplicationService  # noqa: E402
 from ai_service.app.services.applications.tailoring_service import ApplicationTailoringService  # noqa: E402
 from ai_service.app.services.tasks.runner import TaskRunner  # noqa: E402
-from ai_service.tests.fakes import FakeSearchService, RecordingFiller, offline_llm  # noqa: E402
+from ai_service.tests.fakes import (  # noqa: E402
+    FakePdfRenderer,
+    FakeSearchService,
+    FakeSuggester,
+    RecordingFiller,
+    offline_llm,
+)
 
 
 async def reset_database() -> None:
@@ -43,16 +49,18 @@ async def reset_database() -> None:
 async def client():
     """API client on an empty database, with fake search/LLM/browser and a manually driven task runner."""
     await reset_database()
-    filler = RecordingFiller()
+    filler, renderer, suggester = RecordingFiller(), FakePdfRenderer(), FakeSuggester()
     llm = offline_llm()
     service = ApplicationService(
-        AsyncSessionLocal, lambda: ApplicationAgent(ApplicationTailoringService(llm), filler=filler)
+        AsyncSessionLocal,
+        lambda: ApplicationAgent(ApplicationTailoringService(llm), filler=filler, pdf_renderer=renderer),
+        suggester=suggester,
     )
     app.dependency_overrides[deps.get_search_agent] = lambda: SearchAgent(FakeSearchService(), llm)
     app.dependency_overrides[deps.get_application_service] = lambda: service
     app.dependency_overrides[deps.get_resume_parser] = lambda: deps.ResumeParserService(llm)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
-        c.filler = filler
+        c.filler, c.renderer, c.suggester = filler, renderer, suggester
         c.service = service
         # Queued agent work runs when a test calls `await client.runner.run_due_once()`.
         c.runner = TaskRunner(AsyncSessionLocal, service.task_handlers(), backoff_seconds=[0])

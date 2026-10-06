@@ -6,6 +6,7 @@ export const store = {
         jobs: [],          // [{ job, match }]
         applications: [],  // ApplicationRead[]
         profile: null,     // CandidateProfile | null
+        answers: [],       // ScreeningAnswerRead[] (the answer bank)
         jobFilter: 'all',
     },
 

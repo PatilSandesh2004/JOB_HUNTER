@@ -14,6 +14,7 @@ from ai_service.app.services.jobs.enrichment_service import JobEnrichmentService
 from ai_service.app.services.jobs.recheck_service import JobRecheckService
 from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
 from ai_service.app.services.resume.resume_parser import ResumeParserService
+from ai_service.app.services.screening.answer_bank import ScreeningSuggester
 from ai_service.app.services.search.board_source import BoardSearchSource
 from ai_service.app.services.search.search_service import SearchService
 from ai_service.app.services.tasks.runner import PeriodicJob, TaskRunner
@@ -48,7 +49,9 @@ def get_notifier() -> WebhookNotificationService:
 @lru_cache
 def get_application_service() -> ApplicationService:
     return ApplicationService(
-        AsyncSessionLocal, agent_factory=lambda: ApplicationAgent(ApplicationTailoringService(get_llm()))
+        AsyncSessionLocal,
+        agent_factory=lambda: ApplicationAgent(ApplicationTailoringService(get_llm())),
+        suggester=ScreeningSuggester(get_llm()),
     )
 
 

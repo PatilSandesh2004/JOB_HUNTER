@@ -23,6 +23,20 @@ FORM = """<!doctype html><html><body>
 </form></body></html>"""
 
 CONSENT = '<label><input type="checkbox" name="consent" required> I agree to the privacy policy</label>'
+SCREENING = """
+  <fieldset><legend>Are you legally authorized to work in India? *</legend>
+    <label><input type="radio" name="auth" value="y" required> Yes</label>
+    <label><input type="radio" name="auth" value="n"> No</label>
+  </fieldset>
+  <div class="field"><span class="label">Will you require visa sponsorship? *</span>
+    <label for="sp-y">Yes</label><input type="radio" id="sp-y" name="sponsor_radio" value="yes" required>
+    <label for="sp-n">No</label><input type="radio" id="sp-n" name="sponsor_radio" value="no">
+  </div>
+  <label for="gender">Gender (voluntary)</label>
+  <select id="gender" name="gender"><option value="">Select...</option><option>Male</option><option>Female</option>
+    <option>Decline to self-identify</option></select>
+  <label for="hear">How did you hear about us? *</label><input id="hear" name="hear" required>
+"""
 LANDING = '<html><body><h1>Data Engineer</h1><a href="/apply">Apply for this job</a></body></html>'
 THANKS = "<html><body><h1>Thank you for applying!</h1><p>We have received your application.</p></body></html>"
 
@@ -32,6 +46,7 @@ class _Handler(BaseHTTPRequestHandler):
         pages = {
             "/apply": FORM.format(extra=""),
             "/apply-consent": FORM.format(extra=CONSENT),
+            "/apply-screening": FORM.format(extra=SCREENING),
             "/landing": LANDING,
             "/no-form": "<html><body><p>Closed.</p></body></html>",
         }

@@ -110,3 +110,9 @@ def canonicalize(skill: str) -> str:
 
 def normalize_skill_list(skills: list[str]) -> list[str]:
     return list(dict.fromkeys(canonicalize(s) for s in skills if s and s.strip()))
+
+
+def skill_pattern(skill: str) -> re.Pattern[str]:
+    """Regex for mentions of `skill`: its catalogue aliases, or the literal text for skills not in the catalogue."""
+    name = canonicalize(skill)
+    return _compiled().get(name) or re.compile(r"(?<![\w+#.])" + re.escape(name) + r"(?![\w+#])", re.IGNORECASE)

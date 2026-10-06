@@ -34,6 +34,7 @@ class CandidatePreferences(BaseModel):
     visa_sponsorship_required: bool = False
     expected_salary: str | None = None
     notice_period: str | None = None
+    tailor_resume: bool = False  # attach a per-job tailored PDF instead of the uploaded resume
 
 
 class CandidateProfile(BaseModel):

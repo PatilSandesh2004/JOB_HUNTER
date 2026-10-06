@@ -41,6 +41,8 @@ CREATE TABLE applications (id VARCHAR(36) NOT NULL PRIMARY KEY,
     screenshot_path VARCHAR(1000), confirmation TEXT, error TEXT, applied_at DATETIME,
     created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL);
 CREATE INDEX ix_applications_status ON applications (status);
+CREATE INDEX ix_applications_candidate_id ON applications (candidate_id);
+CREATE INDEX ix_applications_job_id ON applications (job_id);
 INSERT INTO candidates VALUES ('c1', 'Asha Rao', 'asha@example.com', NULL, NULL, NULL, NULL, 4, NULL, NULL, NULL,
     NULL, '[]', '[]', '[]', '{}', NULL, '2026-01-01', '2026-01-01');
 INSERT INTO jobs VALUES ('j1', 'AI Engineer', 'Acme', '', 'Remote', 'REMOTE', 'UNKNOWN', NULL, NULL, NULL, NULL, NULL,
@@ -79,7 +81,7 @@ async def test_legacy_database_is_adopted_without_data_loss(tmp_path):
     with sqlite3.connect(db) as conn:
         conn.executescript(LEGACY_SCHEMA)
 
-    await _migrate_file(db)
+    assert await _migrate_file(db) == []
 
     conn = sqlite3.connect(db)
     assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == (HEAD,)
@@ -101,3 +103,20 @@ async def test_downgrade_then_upgrade(tmp_path, target):
     finally:
         await engine.dispose()
     assert await _migrate_file(db) == []
+
+
+async def test_downgrade_with_data_keeps_rows(tmp_path):
+    db = tmp_path / "legacy-roundtrip.db"
+    with sqlite3.connect(db) as conn:
+        conn.executescript(LEGACY_SCHEMA)
+    await _migrate_file(db)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db.as_posix()}")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda c: command.downgrade(alembic_config(c), "0001"))
+    finally:
+        await engine.dispose()
+    assert await _migrate_file(db) == []
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT count(*) FROM applications").fetchone() == (2,)
+    assert conn.execute("SELECT events, questions FROM applications").fetchall() == [("[]", "[]")] * 2

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -72,11 +73,44 @@ async def approve_application(
     return await service.approve(db, application_id)
 
 
+@router.post("/{application_id}/refill", response_model=ApplicationRead, status_code=status.HTTP_202_ACCEPTED)
+async def refill_application(
+    application_id: str,
+    db: AsyncSession = Depends(get_db),
+    service: ApplicationService = Depends(get_application_service),
+):
+    """Fill the form again (no submit), e.g. after saving answers to its open questions."""
+    return await service.refill(db, application_id)
+
+
 @router.get("/{application_id}/screenshot", response_class=FileResponse)
 async def get_screenshot(application_id: str, db: AsyncSession = Depends(get_db)):
+    """The most recent screenshot of the form."""
     row = await ApplicationRepository(db).get(application_id)
     path = Path(row.screenshot_path) if row and row.screenshot_path else None
-    # Only ever serve files from the screenshots directory.
-    if path is None or not path.is_file() or path.resolve().parent != settings.screenshots_dir.resolve():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No screenshot available")
+    return FileResponse(_inside(path, settings.screenshots_dir, "No screenshot available"), media_type="image/png")
+
+
+@router.get("/{application_id}/screenshots/{name}", response_class=FileResponse)
+async def get_step_screenshot(application_id: str, name: str):
+    """A screenshot referenced by the activity timeline."""
+    if not re.fullmatch(rf"{re.escape(application_id)}-[\w-]+\.png", name):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such screenshot")
+    path = _inside(settings.screenshots_dir / name, settings.screenshots_dir, "No such screenshot")
     return FileResponse(path, media_type="image/png")
+
+
+@router.get("/{application_id}/resume", response_class=FileResponse)
+async def get_tailored_resume(application_id: str, db: AsyncSession = Depends(get_db)):
+    """The tailored resume PDF attached to this application."""
+    row = await ApplicationRepository(db).get(application_id)
+    path = Path(row.tailored_resume_path) if row and row.tailored_resume_path else None
+    path = _inside(path, settings.resumes_dir / "tailored", "No tailored resume for this application")
+    return FileResponse(path, media_type="application/pdf", filename=f"resume-{row.company}.pdf".replace(" ", "-"))
+
+
+def _inside(path: Path | None, directory: Path, missing: str) -> Path:
+    """Serve only existing files directly inside `directory` (no traversal via stored paths)."""
+    if path is None or not path.is_file() or path.resolve().parent != directory.resolve():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, missing)
+    return path

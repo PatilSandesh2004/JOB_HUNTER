@@ -22,6 +22,7 @@ export function fillProfileForm(profile) {
     $('p-remote').value = prefs.remote_preference || 'ANY';
     $('p-visa').value = String(Boolean(prefs.visa_sponsorship_required));
     $('p-relocate').checked = Boolean(prefs.willing_to_relocate);
+    $('p-tailor').checked = Boolean(prefs.tailor_resume);
     $('p-salary').value = prefs.expected_salary || '';
     $('p-notice').value = prefs.notice_period || '';
 
@@ -55,6 +56,7 @@ export function readProfileForm(existing) {
             remote_preference: $('p-remote').value,
             visa_sponsorship_required: $('p-visa').value === 'true',
             willing_to_relocate: $('p-relocate').checked,
+            tailor_resume: $('p-tailor').checked,
             expected_salary: $('p-salary').value.trim() || null,
             notice_period: $('p-notice').value.trim() || null,
         },
@@ -66,4 +68,20 @@ export function renderNavbar(profile) {
     $('nav-name').textContent = name || 'No profile yet';
     $('nav-role').textContent = profile?.current_role || (name ? '' : 'Upload your resume');
     $('nav-avatar').textContent = name ? name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() : '?';
+}
+
+/** The answer bank list: each saved answer is editable in place. */
+export function renderAnswers(container, answers) {
+    if (!answers.length) {
+        container.innerHTML = '<p class="muted">No saved answers yet. Add one above, or answer the questions shown on an application.</p>';
+        return;
+    }
+    container.innerHTML = answers.map((a) => `
+        <div class="answer-row" data-answer-id="${esc(a.id)}">
+            <div class="answer-question">${esc(a.question)}
+                ${a.source === 'suggested' ? '<span class="tag subtle" title="Accepted from an AI suggestion">ai-drafted</span>' : ''}</div>
+            <input class="answer-input" value="${esc(a.answer)}" data-question="${esc(a.question)}" aria-label="Answer">
+            <button class="btn-secondary btn-sm" data-action="update-answer" data-answer-id="${esc(a.id)}"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            <button class="btn-ghost btn-sm" data-action="delete-answer" data-answer-id="${esc(a.id)}" aria-label="Delete answer"><i class="fa-solid fa-trash"></i></button>
+        </div>`).join('');
 }

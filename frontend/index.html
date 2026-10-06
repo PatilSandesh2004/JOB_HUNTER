@@ -183,6 +183,8 @@
                         </div>
                         <p class="muted small">Used only to answer those questions on application forms. Leave blank to answer them yourself.</p>
                         <label class="checkbox-row"><input type="checkbox" id="p-relocate"> Willing to relocate</label>
+                        <label class="checkbox-row" title="A PDF built from this profile, leading with the skills each posting asks for. Nothing is invented; you can download and check it on the application.">
+                            <input type="checkbox" id="p-tailor"> Attach a resume tailored to each job (instead of the uploaded one)</label>
                         <button type="submit" class="btn-primary" id="btn-save-profile"><i class="fa-solid fa-floppy-disk"></i> Save profile</button>
                     </form>
                 </div>
@@ -204,6 +206,20 @@
                         <div class="resume-tags" id="skill-tags"></div>
                     </div>
                 </div>
+            </div>
+
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-comments"></i> Saved answers</h2>
+                    <p>Answers to application questions ("How did you hear about us?", "Are you authorized to work in…?").
+                       The agent reuses them whenever a form asks the same question. Questions it cannot answer show up on the application for you to answer once.</p>
+                </div>
+                <form id="answer-form" class="answer-add">
+                    <input id="answer-question" placeholder="Question, as the form words it" required maxlength="500">
+                    <input id="answer-text" placeholder="Your answer" required maxlength="5000">
+                    <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add</button>
+                </form>
+                <div id="answer-list" class="answer-list"></div>
             </div>
         </section>
 

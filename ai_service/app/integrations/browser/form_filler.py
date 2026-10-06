@@ -1,9 +1,10 @@
 """Playwright-driven application form filler.
 
 Fields are classified from their label / name / placeholder / aria-label / autocomplete attributes and
-filled only with data the candidate actually provided. Submission happens only when explicitly
+filled only with data the candidate actually provided: profile fields, plus screening answers the user
+wrote or approved (see services/screening/answer_bank.py). Submission happens only when explicitly
 requested, every required field is filled and no visible CAPTCHA is present; anything else is handed
-back to the human with a screenshot.
+back to the human with a screenshot and a list of the questions that still need an answer.
 """
 
 import asyncio
@@ -16,10 +17,14 @@ from pathlib import Path
 from typing import Any
 
 from ai_service.app.core.config import settings
+from ai_service.app.core.timeline import timeline_event
 from ai_service.app.integrations.browser.runtime import in_browser_thread
 from ai_service.app.services.jobs.ats import apply_page_url
+from ai_service.app.services.screening.answer_bank import CHOICE_KINDS, AnswerBook, choose_option, real_options
 
 logger = logging.getLogger("jobpilot.browser")
+
+ANSWER_BANK = "answer"  # filled_fields value for fields answered from the answer bank
 
 
 class FillOutcome(StrEnum):
@@ -48,6 +53,7 @@ class ApplicantPacket:
     cover_letter: str | None = None
     resume_path: str | None = None
     requires_sponsorship: bool | None = None
+    answers: AnswerBook = field(default_factory=AnswerBook)
 
     def value_for(self, key: str) -> str | None:
         if key == "years_of_experience":
@@ -61,8 +67,10 @@ class ApplicantPacket:
 @dataclass
 class FillResult:
     outcome: FillOutcome
-    filled_fields: dict[str, str] = field(default_factory=dict)  # field label -> semantic key
+    filled_fields: dict[str, str] = field(default_factory=dict)  # field label -> semantic key (or ANSWER_BANK)
     missing_required: list[str] = field(default_factory=list)
+    # Required questions left empty, with what the UI needs to ask the user: {label, kind, options, required}.
+    unanswered: list[dict[str, Any]] = field(default_factory=list)
     captcha_detected: bool = False
     screenshot_path: str | None = None
     confirmation: str | None = None
@@ -70,6 +78,7 @@ class FillResult:
     final_url: str | None = None
     # True once the submit button was clicked: from then on a retry could create a duplicate application.
     submit_attempted: bool = False
+    events: list[dict[str, Any]] = field(default_factory=list)  # timeline entries (core/timeline.py)
 
 
 # (semantic key, descriptor regex, allowed element kinds or None for text-like inputs)
@@ -104,7 +113,7 @@ _FIELD_RULES: list[tuple[str, re.Pattern[str], set[str] | None]] = [
         re.compile(r"notice.?period|when can you start|earliest (possible )?start|available to start"),
         None,
     ),
-    ("requires_sponsorship", re.compile(r"(require|need).{0,40}sponsor|sponsorship"), {"select"}),
+    ("requires_sponsorship", re.compile(r"(require|need).{0,40}sponsor|sponsorship"), {"select", "radio"}),
     ("location", re.compile(r"\blocation\b|\bcity\b|where are you (currently )?(based|located)"), None),
     ("full_name", re.compile(r"full.?name|^\s*name\s*\*?\s*$|your name|\bname\b"), None),
 ]
@@ -123,6 +132,7 @@ _CONTACT_KEYS = {
     "github_url",
     "portfolio_url",
 }
+_REPEATABLE_KEYS = {"email", "requires_sponsorship"}
 # Input type that best fits a key when a form has several candidates (e.g. a country-code box + a tel input).
 _PREFERRED_KIND = {"email": "email", "phone": "tel", "linkedin_url": "url", "github_url": "url", "portfolio_url": "url"}
 
@@ -139,13 +149,15 @@ _SUBMIT_BUTTON_RE = re.compile(r"submit( (my |your )?application)?|send applicat
 _DISCOVER_JS = """
 () => {
   const isVisible = (el) => {
+    if (!el) return false;
     const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
   const text = (n) => (n && n.innerText ? n.innerText : '').replace(/\\s+/g, ' ').trim();
+  const forLabel = (el) => el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
   const labelFor = (el) => {
     const parts = [];
-    if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) parts.push(text(l)); }
+    const l = forLabel(el); if (l) parts.push(text(l));
     const wrap = el.closest('label'); if (wrap) parts.push(text(wrap));
     (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
       .forEach((id) => parts.push(text(document.getElementById(id))));
@@ -155,6 +167,24 @@ _DISCOVER_JS = """
     }
     return parts.join(' ').slice(0, 200);
   };
+  // The question a radio group answers: fieldset legend, radiogroup label, or the nearest text above it.
+  const groupQuestion = (el, optionLabels) => {
+    const fs = el.closest('fieldset');
+    if (fs) { const lg = fs.querySelector('legend'); if (lg && text(lg)) return text(lg).slice(0, 200); }
+    const rg = el.closest('[role="radiogroup"]');
+    if (rg) {
+      const named = rg.getAttribute('aria-label') || text(document.getElementById(rg.getAttribute('aria-labelledby') || ''));
+      if (named) return named.slice(0, 200);
+    }
+    let box = el.parentElement;
+    for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
+      const found = Array.from(box.querySelectorAll('label, legend, [class*="label"], [class*="question"], p, span'))
+        .find((n) => !n.querySelector('input') && text(n) && !optionLabels.includes(text(n)));
+      if (found) return text(found).slice(0, 200);
+    }
+    return '';
+  };
+
   const out = [];
   document.querySelectorAll('input, textarea, select').forEach((el, i) => {
     const kind = el.tagName === 'INPUT' ? (el.getAttribute('type') || 'text').toLowerCase() : el.tagName.toLowerCase();
@@ -163,15 +193,46 @@ _DISCOVER_JS = """
     if (kind !== 'file' && !isVisible(el)) return;
     const id = `jp-${i}`;
     const label = labelFor(el);
+    const display = (label || el.placeholder || el.name || el.id || id).slice(0, 80);
     const required = el.required || el.getAttribute('aria-required') === 'true' || /\\*\\s*$/.test(label);
     el.setAttribute('data-jobpilot-id', id);
-    el.setAttribute('data-jobpilot-label', (label || el.placeholder || el.name || el.id || id).slice(0, 80));
+    el.setAttribute('data-jobpilot-label', display);
     if (required) el.setAttribute('data-jobpilot-required', '1');
     out.push({
-      id, kind, label, required,
+      id, kind, label, display, required, option_ids: [],
       descriptor: [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), el.getAttribute('autocomplete'), label]
         .filter(Boolean).join(' | '),
       options: el.tagName === 'SELECT' ? Array.from(el.options).map((o) => o.text.trim()) : [],
+    });
+  });
+
+  // Radio buttons are grouped into one question each (they are often visually replaced by their labels).
+  const groups = new Map();
+  document.querySelectorAll('input[type="radio"]').forEach((el) => {
+    if (el.disabled) return;
+    const key = el.name || `__${el.id}`;
+    if (!groups.has(key)) groups.set(key, { inputs: [], labels: [] });
+    groups.get(key).inputs.push(el);
+    groups.get(key).labels.push((labelFor(el) || el.value || '').slice(0, 120));
+  });
+  let n = 0;
+  groups.forEach((group) => {
+    if (!group.inputs.some((el) => isVisible(el) || isVisible(el.closest('label')) || isVisible(forLabel(el)))) return;
+    const first = group.inputs[0];
+    const question = groupQuestion(first, group.labels);
+    const id = `jp-rg-${n++}`;
+    const display = (question || first.name || id).slice(0, 80);
+    const required = group.inputs.some((el) => el.required || el.getAttribute('aria-required') === 'true')
+      || /\\*\\s*$/.test(question);
+    const optionIds = group.inputs.map((el, k) => {
+      el.setAttribute('data-jobpilot-id', `${id}-${k}`);
+      if (required) el.setAttribute('data-jobpilot-required-radio', id);
+      return `${id}-${k}`;
+    });
+    first.setAttribute('data-jobpilot-label', display);
+    out.push({
+      id, kind: 'radio', label: question, display, required, option_ids: optionIds, options: group.labels,
+      descriptor: [first.name, question].filter(Boolean).join(' | '),
     });
   });
   return out;
@@ -184,10 +245,16 @@ _EMPTY_REQUIRED_JS = """
     .filter((el) => el.type === 'file' ? !(el.files && el.files.length) : !(el.value || '').trim())
     .map((el) => el.getAttribute('data-jobpilot-label'));
   const groups = new Map();
-  document.querySelectorAll('input[type=checkbox][required], input[type=radio][required]').forEach((el) => {
-    const key = el.name || el.id;
-    const label = ((el.closest('label') || {}).innerText || el.name || 'checkbox').replace(/\\s+/g, ' ').trim();
-    groups.set(key, (groups.get(key) || { label, checked: false }));
+  const choices = 'input[type=checkbox][required], input[type=radio][required], input[data-jobpilot-required-radio]';
+  document.querySelectorAll(choices).forEach((el) => {
+    const groupId = el.getAttribute('data-jobpilot-required-radio');
+    const key = groupId || el.name || el.id;
+    if (!groups.has(key)) {
+      const first = groupId ? document.querySelector(`[data-jobpilot-id="${groupId}-0"]`) : null;
+      const label = (first && first.getAttribute('data-jobpilot-label'))
+        || ((el.closest('label') || {}).innerText || el.name || 'checkbox').replace(/\\s+/g, ' ').trim();
+      groups.set(key, { label, checked: false });
+    }
     if (el.checked) groups.get(key).checked = true;
   });
   groups.forEach((g) => { if (!g.checked) missing.push(g.label.slice(0, 80)); });
@@ -214,15 +281,28 @@ def classify_field(descriptor: str, kind: str) -> str | None:
     return None
 
 
+def question_text(f: dict[str, Any]) -> str:
+    """The wording used to look a field up in (and save it to) the answer bank."""
+    return f.get("label") or f.get("display") or ""
+
+
 async def fill_application(url: str, packet: ApplicantPacket, *, submit: bool, screenshot_path: Path) -> FillResult:
-    """Run the filler in a dedicated thread/event loop (Playwright needs subprocess support on Windows)."""
+    """Run the filler in a dedicated thread/event loop (Playwright needs subprocess support on Windows).
+
+    Screenshots are saved next to `screenshot_path` as `<stem>-<step>.png`.
+    """
     return await in_browser_thread(lambda: _FormFillSession(packet, screenshot_path).run(url, submit))
 
 
 class _FormFillSession:
     def __init__(self, packet: ApplicantPacket, screenshot_path: Path) -> None:
         self.packet = packet
-        self.screenshot_path = screenshot_path
+        self.screenshot_base = screenshot_path
+        self.latest_screenshot: Path | None = None
+        self.events: list[dict[str, Any]] = []
+
+    def _event(self, step: str, detail: str = "", screenshot: str | None = None) -> None:
+        self.events.append(timeline_event(step, detail, screenshot))
 
     async def run(self, url: str, submit: bool) -> FillResult:
         from playwright.async_api import async_playwright
@@ -233,11 +313,12 @@ class _FormFillSession:
             context.set_default_timeout(settings.browser_timeout_ms)
             page = await context.new_page()
             try:
-                return await self._run_on_page(page, url, submit)
+                result = await self._run_on_page(page, url, submit)
             except Exception as exc:
                 logger.exception("Form filling failed for %s", url)
-                await self._screenshot(page)
-                return FillResult(
+                shot = await self._screenshot(page, "error")
+                self._event("Error", f"{type(exc).__name__}: {exc}", shot)
+                result = FillResult(
                     FillOutcome.FAILED,
                     message=f"{type(exc).__name__}: {exc}",
                     screenshot_path=self._saved_screenshot(),
@@ -245,31 +326,45 @@ class _FormFillSession:
                 )
             finally:
                 await browser.close()
+        result.events = self.events
+        return result
 
     async def _run_on_page(self, page: Any, url: str, submit: bool) -> FillResult:
         await self._goto(page, apply_page_url(url))
+        self._event("Opened the application page", page.url)
         frame, fields = await self._find_form(page)
         if not fields and await self._click_apply(page):
+            self._event("Clicked Apply", page.url)
             frame, fields = await self._find_form(page)
 
         if not fields:
             login_wall = await page.locator("input[type='password']").count() > 0
-            await self._screenshot(page)
+            message = "Login required to apply" if login_wall else "No application form found on the page"
+            self._event(message, page.url, await self._screenshot(page, "no-form"))
             return FillResult(
-                FillOutcome.NEEDS_MANUAL,
-                message="Login required to apply" if login_wall else "No application form found on the page",
-                screenshot_path=self._saved_screenshot(),
-                final_url=page.url,
+                FillOutcome.NEEDS_MANUAL, message=message, screenshot_path=self._saved_screenshot(), final_url=page.url
             )
 
+        recognised = sum(1 for f in fields if f["key"])
+        self._event("Found the application form", f"{len(fields)} fields, {recognised} recognised from your profile")
         filled = await self._fill_fields(frame, fields)
         missing = [m for m in await frame.evaluate(_EMPTY_REQUIRED_JS) if m]
+        unanswered = _unanswered(fields, missing)
         captcha = await self._captcha_visible(page)
-        await self._screenshot(page)
+        answered = sum(1 for source in filled.values() if source == ANSWER_BANK)
+        detail = f"{len(filled)} fields" + (f", {answered} from your answer bank" if answered else "")
+        if "resume" in filled.values():
+            detail += ", resume attached"
+        self._event("Filled the form", detail, await self._screenshot(page, "filled"))
+        if missing:
+            self._event("Needs your input", ", ".join(missing[:8]))
+        if captcha:
+            self._event("CAPTCHA on the page", "This one has to be submitted by you")
         result = FillResult(
             FillOutcome.FILLED,
             filled_fields=filled,
             missing_required=missing,
+            unanswered=unanswered,
             captcha_detected=captcha,
             screenshot_path=self._saved_screenshot(),
             final_url=page.url,
@@ -325,48 +420,71 @@ class _FormFillSession:
         return False
 
     async def _fill_fields(self, frame: Any, fields: list[dict[str, Any]]) -> dict[str, str]:
+        """Fill recognised profile fields, then answer other questions from the answer bank."""
         filled: dict[str, str] = {}
         used_keys: set[str] = set()
         has_split_name = any(f["key"] in ("first_name", "last_name") for f in fields)
-        # Best candidate per key first: preferred input type, then required fields.
+        # Best candidate per key first: preferred input type, then required fields. Unrecognised fields last.
         ordered = sorted(
-            fields, key=lambda f: (f["kind"] != _PREFERRED_KIND.get(f["key"], f["kind"]), not f["required"])
+            fields,
+            key=lambda f: (f["key"] is None, f["kind"] != _PREFERRED_KIND.get(f["key"], f["kind"]), not f["required"]),
         )
         for f in ordered:
-            key, label = f["key"], (f["label"] or f["descriptor"])[:80]
-            # "Confirm email" fields legitimately repeat; everything else is filled once.
-            if not key or (key in used_keys and key != "email") or (key == "full_name" and has_split_name):
+            key, label = f["key"], (f["label"] or f["display"] or f["descriptor"])[:80]
+            # "Confirm email" and repeated sponsorship questions legitimately repeat; the rest is filled once.
+            if key and ((key in used_keys and key not in _REPEATABLE_KEYS) or (key == "full_name" and has_split_name)):
                 continue
-            locator = frame.locator(f'[data-jobpilot-id="{f["id"]}"]')
+            if not key and f["kind"] == "file":
+                continue
             try:
-                if await self._fill_one(locator, f, key):
-                    filled[label] = key
-                    used_keys.add(key)
+                source = await self._fill_one(frame, f, key)
             except Exception as exc:
                 logger.info("Could not fill '%s' (%s): %s", label, key, exc)
+                continue
+            if source:
+                filled[label] = key if source == "profile" else ANSWER_BANK
+                if key:
+                    used_keys.add(key)
         return filled
 
-    async def _fill_one(self, locator: Any, f: dict[str, Any], key: str) -> bool:
+    def _value(self, f: dict[str, Any], key: str | None) -> tuple[str | None, str]:
+        """(value, source) for a field: source is 'profile' or 'answer' (answer bank)."""
         if key == "requires_sponsorship":
             if self.packet.requires_sponsorship is None:
-                return False
-            wanted = "yes" if self.packet.requires_sponsorship else "no"
-            option = next((o for o in f["options"] if o.strip().lower().startswith(wanted)), None)
-            if option is None:
-                return False
-            await locator.select_option(label=option)
-            return True
+                return None, ""
+            return ("Yes" if self.packet.requires_sponsorship else "No"), "profile"
+        if key:
+            value = self.packet.value_for(key)
+            if value or key in ("resume", "cover_letter_file"):
+                return value, "profile"
+        answer = self.packet.answers.answer_for(question_text(f), f["kind"], f["options"])
+        return answer, "answer"
 
-        value = self.packet.value_for(key)
+    async def _fill_one(self, frame: Any, f: dict[str, Any], key: str | None) -> str | None:
+        """Fill one control. Returns the value's source, or None when it was left empty."""
+        value, source = self._value(f, key)
         if not value:
-            return False
+            return None
+        locator = frame.locator(f'[data-jobpilot-id="{f["id"]}"]')
         if f["kind"] == "file":
             if not await asyncio.to_thread(Path(value).is_file):
-                return False
+                return None
             await locator.set_input_files(value)
+        elif f["kind"] in CHOICE_KINDS:
+            option = choose_option(f["options"], value)
+            if option is None:
+                return None
+            if f["kind"] == "select":
+                await locator.select_option(label=option)
+            else:
+                radio = frame.locator(f'[data-jobpilot-id="{f["option_ids"][f["options"].index(option)]}"]')
+                try:
+                    await radio.check(timeout=3000)
+                except Exception:
+                    await radio.check(force=True)  # styled radios hide the input behind their label
         else:
             await locator.fill(value)
-        return True
+        return source
 
     async def _submit(self, page: Any, frame: Any, result: FillResult) -> FillResult:
         button = frame.locator("button[type='submit'], input[type='submit']").first
@@ -374,13 +492,16 @@ class _FormFillSession:
             button = frame.get_by_role("button", name=_SUBMIT_BUTTON_RE).first
         if await button.count() == 0:
             result.outcome, result.message = FillOutcome.NEEDS_MANUAL, "Could not find the submit button"
+            self._event(result.message)
             return result
 
         result.submit_attempted = True
+        self._event("Clicked Submit")
         await button.click()
         await self._settle(page)
         await page.wait_for_timeout(1500)
-        await self._screenshot(page)
+        shot = await self._screenshot(page, "submitted")
+        result.screenshot_path = self._saved_screenshot()
         result.final_url = page.url
 
         for candidate in [page.main_frame, *page.frames]:
@@ -392,6 +513,7 @@ class _FormFillSession:
             if match:
                 result.outcome = FillOutcome.SUBMITTED
                 result.confirmation = body[max(0, match.start() - 60) : match.end() + 120].strip()
+                self._event("Confirmation received", match.group(0), shot)
                 return result
 
         result.outcome = FillOutcome.NEEDS_MANUAL
@@ -399,6 +521,7 @@ class _FormFillSession:
             "Submit was clicked but no confirmation message was detected. "
             "Check the screenshot before retrying to avoid a duplicate application."
         )
+        self._event("No confirmation message detected", page.url, shot)
         return result
 
     @staticmethod
@@ -414,11 +537,31 @@ class _FormFillSession:
                     return True
         return False
 
-    async def _screenshot(self, page: Any) -> None:
+    async def _screenshot(self, page: Any, step: str) -> str | None:
+        """Save `<stem>-<step>.png` next to the requested path; returns the file name."""
+        path = self.screenshot_base.with_name(f"{self.screenshot_base.stem}-{step}.png")
         try:
-            await page.screenshot(path=str(self.screenshot_path), full_page=True)
+            await page.screenshot(path=str(path), full_page=True)
         except Exception as exc:
             logger.info("Screenshot failed: %s", exc)
+            return None
+        self.latest_screenshot = path
+        return path.name
 
     def _saved_screenshot(self) -> str | None:
-        return str(self.screenshot_path) if self.screenshot_path.exists() else None
+        return str(self.latest_screenshot) if self.latest_screenshot and self.latest_screenshot.exists() else None
+
+
+def _unanswered(fields: list[dict[str, Any]], missing_labels: list[str]) -> list[dict[str, Any]]:
+    """Required questions still empty after filling, in the shape the UI needs to ask the user."""
+    missing = set(missing_labels)
+    seen: set[str] = set()
+    questions = []
+    for f in fields:
+        question = question_text(f)
+        if f["kind"] == "file" or f["display"] not in missing or not question or question in seen:
+            continue
+        seen.add(question)
+        options = real_options(f["options"]) if f["kind"] in CHOICE_KINDS else []
+        questions.append({"label": question, "kind": f["kind"], "options": options, "required": True})
+    return questions

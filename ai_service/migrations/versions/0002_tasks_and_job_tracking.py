@@ -53,7 +53,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("agent_tasks")
     op.drop_index("ix_jobs_overall_match", table_name="jobs")
-    with op.batch_alter_table("jobs") as batch:
-        batch.drop_column("last_checked_at")
-        batch.drop_column("closed_at")
-        batch.drop_column("overall_match")
+    # Plain DROP COLUMN (SQLite >= 3.35): a batch table rebuild would trip the applications -> jobs FK.
+    for column in ("last_checked_at", "closed_at", "overall_match"):
+        op.drop_column("jobs", column)

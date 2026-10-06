@@ -147,5 +147,13 @@ export const api = {
         request('/applications', { method: 'POST', body: { job_id: jobId, mode } }),
     updateApplication: (id, patch) => request(`/applications/${id}`, { method: 'PATCH', body: patch }),
     approveApplication: (id) => request(`/applications/${id}/approve`, { method: 'POST' }),
+    refillApplication: (id) => request(`/applications/${id}/refill`, { method: 'POST' }),
     screenshotUrl: (id) => blobUrl(`/applications/${id}/screenshot`),
+    stepScreenshotUrl: (id, name) => blobUrl(`/applications/${id}/screenshots/${encodeURIComponent(name)}`),
+    tailoredResumeUrl: (id) => blobUrl(`/applications/${id}/resume`),
+
+    // Answer bank: [{question, answer, source}]; an empty answer deletes the saved one.
+    listAnswers: () => request('/screening-answers'),
+    saveAnswers: (answers) => request('/screening-answers', { method: 'PUT', body: answers }),
+    deleteAnswer: (id) => request(`/screening-answers/${id}`, { method: 'DELETE' }),
 };
