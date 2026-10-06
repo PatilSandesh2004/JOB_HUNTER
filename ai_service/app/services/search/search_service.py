@@ -1,117 +1,178 @@
-import asyncio
-import logging
-from typing import List, Dict, Any
-import httpx
-from ai_service.app.integrations.search.searxng_client import SearXNGClient
-from ai_service.app.schemas.search import SearchQueryRequest
+"""Multi-source job discovery: SearXNG (ATS-targeted), Remotive and Arbeitnow."""
 
-logger = logging.getLogger("jobpilot.search_service")
+import asyncio
+import html
+import logging
+import re
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+from ai_service.app.core.config import Settings, settings
+from ai_service.app.integrations.search.searxng_client import SearXNGClient
+from ai_service.app.schemas.search import RawJobPosting
+from ai_service.app.services.jobs.ats import ATS_SEARCH_SITES, detect_ats
+
+if TYPE_CHECKING:
+    from ai_service.app.services.search.board_source import BoardSearchSource
+
+logger = logging.getLogger("jobpilot.search")
+
+REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
+ARBEITNOW_URL = "https://www.arbeitnow.com/api/job-board-api"
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+# "Remote AI Engineer Jobs in the US", "1,234 Python jobs", "Jobs at Acme" are listing pages, not postings.
+LISTING_TITLE_RE = re.compile(
+    r"\bjobs\s+(in|near|for|at)\b|\b\d[\d,]*\+?\s+[\w\s-]*\bjobs\b|\bjob (openings|search)\b|^jobs at\b|\bjobs\s*[(|-]",
+    re.I,
+)
+
+
+def strip_html(text: str | None, limit: int = 4000) -> str:
+    # Unescape before stripping: some APIs (Greenhouse) return HTML-escaped HTML ("&lt;p&gt;").
+    unescaped = html.unescape(text or "")
+    cleaned = _WS_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", unescaped))).strip()
+    return cleaned[:limit]
 
 
 class SearchService:
-    """
-    Multi-Source Job Search Aggregator:
-    1. SearXNG Metasearch across Google/DuckDuckGo/Bing
-    2. Remotive Live Remote Jobs API
-    3. Arbeitnow Job Board API
-    4. Direct ATS Site Targeter (Greenhouse, Lever, Ashby)
-    """
+    MAX_ATS_TARGETED_QUERIES = 2  # company boards are the primary source; keep web-search load low
 
-    def __init__(self, searxng_client: SearXNGClient) -> None:
-        self.searxng_client = searxng_client
+    def __init__(
+        self,
+        searxng_client: SearXNGClient | None = None,
+        config: Settings = settings,
+        board_source: "BoardSearchSource | None" = None,
+    ) -> None:
+        self.config = config
+        self.searxng = searxng_client or SearXNGClient(config.searxng_url, config.searxng_timeout_seconds)
+        self.boards = board_source
+        self._searxng_limit = asyncio.Semaphore(config.searxng_max_concurrency)
 
-    async def search_searxng(self, query: str) -> List[Dict[str, Any]]:
+    async def search_many(
+        self, queries: list[str], titles: list[str], locations: list[str] | None = None
+    ) -> tuple[list[RawJobPosting], list[str]]:
+        """Run every query against every enabled source concurrently. Returns (postings, errors)."""
+        errors: list[str] = []
+        async with httpx.AsyncClient(timeout=self.config.external_api_timeout_seconds) as client:
+            tasks = [self._searxng_query(q, client) for q in self._expand_ats_queries(queries)]
+            if self.config.search_enable_remotive:
+                tasks += [self._remotive(role, client) for role in titles[:3]]
+            if self.config.search_enable_arbeitnow:
+                tasks.append(self._arbeitnow(titles, client))
+            if self.boards is not None:
+                tasks.append(self.boards.search(titles, locations or []))
+            outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+
+        postings: list[RawJobPosting] = []
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                errors.append(str(outcome))
+                logger.warning("Search source failed: %s", outcome)
+            else:
+                postings.extend(outcome)
+        if self.boards is not None:
+            # Remember company boards found via web search so future searches query them directly.
+            self.boards.remember_from_urls([p.url for p in postings if p.source == "searxng"])
+        return postings, list(dict.fromkeys(errors))
+
+    def _expand_ats_queries(self, queries: list[str]) -> list[str]:
+        expanded = [f"{q} jobs" for q in queries]
+        if self.config.search_ats_targeting:
+            # Site-scoped variants only for the leading queries, to stay under engine rate limits.
+            leading = queries[: self.MAX_ATS_TARGETED_QUERIES]
+            expanded += [f"{q} site:{site}" for q in leading for site in ATS_SEARCH_SITES]
+        return list(dict.fromkeys(expanded))
+
+    async def _searxng_query(self, query: str, client: httpx.AsyncClient) -> list[RawJobPosting]:
+        async with self._searxng_limit:
+            try:
+                results = await self.searxng.search(query, client=client)
+            except Exception as exc:
+                # No query in the message so identical engine failures collapse into one error line.
+                raise RuntimeError(f"SearXNG: {exc}") from exc
+        postings = []
+        for item in results:
+            url = item.get("url") or ""
+            title = strip_html(item.get("title"), 300)
+            if not url.startswith("http") or not detect_ats(url).is_posting or LISTING_TITLE_RE.search(title):
+                continue  # drop articles, board indexes and search/listing pages
+            postings.append(
+                RawJobPosting(
+                    title=title or "Untitled",
+                    url=url,
+                    snippet=strip_html(item.get("content")),
+                    source="searxng",
+                    engine=item.get("engine"),
+                    posted_at=_parse_datetime(item.get("publishedDate")),
+                )
+            )
+        return postings
+
+    async def _remotive(self, search_term: str, client: httpx.AsyncClient) -> list[RawJobPosting]:
         try:
-            response = await self.searxng_client.search(query=query)
-            results = response.get("results", [])
-            if results:
-                return results
-        except Exception as e:
-            logger.warning(f"SearXNG query failed: {e}")
-        return []
-
-    async def fetch_remotive_jobs(self, search_term: str) -> List[Dict[str, Any]]:
-        """Fetch live remote job listings from Remotive API"""
-        url = f"https://remotive.com/api/remote-jobs?search={search_term}&limit=10"
-        try:
-            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
-                res = await client.get(url)
-                if res.status_code == 200:
-                    data = res.json()
-                    jobs = data.get("jobs", [])
-                    return [
-                        {
-                            "title": j.get("title", ""),
-                            "url": j.get("url", ""),
-                            "content": f"{j.get('company_name', '')} - {j.get('category', '')}. {j.get('description', '')[:300]}",
-                            "engine": "remotive_api",
-                        }
-                        for j in jobs[:5]
-                    ]
-        except Exception as e:
-            logger.warning(f"Remotive API fetch failed: {e}")
-        return []
-
-    async def fetch_arbeitnow_jobs(self) -> List[Dict[str, Any]]:
-        """Fetch live postings from Arbeitnow Job API"""
-        url = "https://www.arbeitnow.com/api/job-board-api"
-        try:
-            async with httpx.AsyncClient(timeout=8.0, verify=False) as client:
-                res = await client.get(url)
-                if res.status_code == 200:
-                    data = res.json()
-                    jobs = data.get("data", [])
-                    return [
-                        {
-                            "title": j.get("title", ""),
-                            "url": j.get("url", ""),
-                            "content": f"{j.get('company_name', '')} - {j.get('location', '')}. Tags: {', '.join(j.get('tags', []))}",
-                            "engine": "arbeitnow_api",
-                        }
-                        for j in jobs[:5]
-                    ]
-        except Exception as e:
-            logger.warning(f"Arbeitnow API fetch failed: {e}")
-        return []
-
-    async def search(self, query: str) -> List[Dict[str, Any]]:
-        # Run multi-source searches concurrently
-        searxng_task = self.search_searxng(query)
-        remotive_task = self.fetch_remotive_jobs(query)
-        arbeitnow_task = self.fetch_arbeitnow_jobs()
-
-        searxng_res, remotive_res, arbeitnow_res = await asyncio.gather(
-            searxng_task, remotive_task, arbeitnow_task, return_exceptions=True
-        )
-
-        all_results = []
-        if isinstance(searxng_res, list):
-            all_results.extend(searxng_res)
-        if isinstance(remotive_res, list):
-            all_results.extend(remotive_res)
-        if isinstance(arbeitnow_res, list):
-            all_results.extend(arbeitnow_res)
-
-        if all_results:
-            return all_results
-
-        # Fallback if external APIs are unreachable
+            response = await client.get(REMOTIVE_URL, params={"search": search_term, "limit": 25})
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Remotive API failed: {exc}") from exc
         return [
-            {
-                "title": f"Senior {query} - Global Tech Inc",
-                "url": "https://example.com/careers/senior-eng",
-                "content": f"Hiring Senior {query}. Python, LangGraph, FastAPI. Full H1B visa sponsorship available.",
-                "engine": "multi_source_fallback",
-            }
+            RawJobPosting(
+                title=job.get("title", ""),
+                url=job.get("url", ""),
+                snippet=strip_html(job.get("description")),
+                company=job.get("company_name"),
+                location=job.get("candidate_required_location") or "Remote",
+                remote=True,
+                tags=job.get("tags") or [],
+                source="remotive",
+                posted_at=_parse_datetime(job.get("publication_date")),
+            )
+            for job in response.json().get("jobs", [])
+            if job.get("url")
         ]
 
-    async def search_jobs(self, request: SearchQueryRequest) -> List[Dict[str, Any]]:
-        all_results = []
-        for role in request.roles:
-            loc = request.locations[0] if request.locations else "Remote"
-            query = f"{role} {loc}"
-            if request.remote_only:
-                query += " remote"
-            res = await self.search(query=query)
-            all_results.extend(res)
-        return all_results
+    async def _arbeitnow(self, role_keywords: list[str], client: httpx.AsyncClient) -> list[RawJobPosting]:
+        """Arbeitnow has no server-side search, so filter its latest page by role keywords."""
+        try:
+            response = await client.get(ARBEITNOW_URL)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Arbeitnow API failed: {exc}") from exc
+        keyword_sets = [set(_tokens(role)) for role in role_keywords]
+        postings = []
+        for job in response.json().get("data", []):
+            title_tokens = set(_tokens(job.get("title", "")))
+            if not any(ks and ks <= title_tokens for ks in keyword_sets):
+                continue
+            postings.append(
+                RawJobPosting(
+                    title=job.get("title", ""),
+                    url=job.get("url", ""),
+                    snippet=strip_html(job.get("description")),
+                    company=job.get("company_name"),
+                    location=job.get("location"),
+                    remote=job.get("remote"),
+                    tags=job.get("tags") or [],
+                    source="arbeitnow",
+                    posted_at=_parse_datetime(job.get("created_at")),
+                )
+            )
+        return postings
+
+
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9+#]+", text.lower())
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    try:
+        if isinstance(value, int | float):
+            return datetime.fromtimestamp(value, tz=UTC)
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    except (ValueError, OSError):
+        return None

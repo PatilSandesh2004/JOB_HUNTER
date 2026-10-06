@@ -1,56 +1,66 @@
-import os
+"""FastAPI entrypoint for the JobPilot AI service."""
+
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from ai_service.app.core.config import settings
-from ai_service.app.database.session import engine, Base
-from ai_service.app.api.routes import search, jobs, resume, matching, applications
+
+from ai_service.app.api.deps import get_application_service
+from ai_service.app.api.routes import applications, candidates, health, jobs, search
+from ai_service.app.core.config import REPO_ROOT, settings
+from ai_service.app.core.errors import JobPilotError, LLMUnavailableError, NotFoundError, ResumeParseError
+from ai_service.app.core.logging import configure_logging
+from ai_service.app.database.session import init_db
+from ai_service.app.services.applications.application_service import ApplicationConflictError
+
+logger = logging.getLogger("jobpilot")
+
+_ERROR_STATUS: dict[type[JobPilotError], int] = {
+    NotFoundError: status.HTTP_404_NOT_FOUND,
+    ApplicationConflictError: status.HTTP_409_CONFLICT,
+    ResumeParseError: 422,
+    LLMUnavailableError: status.HTTP_503_SERVICE_UNAVAILABLE,
+}
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Create all DB tables asynchronously on application startup
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def lifespan(_: FastAPI):
+    configure_logging(settings.log_level)
+    await init_db()
+    recovered = await get_application_service().recover_interrupted()
+    if recovered:
+        logger.warning("Marked %d interrupted application(s) as FAILED", recovered)
+    logger.info("JobPilot AI service ready (SearXNG: %s, LLM: %s)", settings.searxng_url, settings.llm_enabled)
     yield
 
 
-app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    lifespan=lifespan,
-)
+app = FastAPI(title=f"{settings.app_name} AI Service", version=settings.app_version, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(search.router, prefix=settings.api_v1_prefix)
-app.include_router(jobs.router, prefix=settings.api_v1_prefix)
-app.include_router(resume.router, prefix=settings.api_v1_prefix)
-app.include_router(matching.router, prefix=settings.api_v1_prefix)
-app.include_router(applications.router, prefix=settings.api_v1_prefix)
 
-# Mount frontend UI directory if present
-frontend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../frontend"))
-if os.path.exists(frontend_path):
-    app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+@app.exception_handler(JobPilotError)
+async def handle_domain_error(_: Request, exc: JobPilotError) -> JSONResponse:
+    code = next((c for t, c in _ERROR_STATUS.items() if isinstance(exc, t)), status.HTTP_400_BAD_REQUEST)
+    return JSONResponse(status_code=code, content={"detail": str(exc)})
 
-    @app.get("/")
-    async def serve_index():
-        return FileResponse(os.path.join(frontend_path, "index.html"))
-else:
-    @app.get("/")
-    async def root():
-        return {
-            "app": settings.app_name,
-            "version": settings.app_version,
-            "status": "online",
-            "docs": "/docs",
-        }
+
+for module in (health, search, jobs, candidates, applications):
+    app.include_router(module.router, prefix=settings.api_v1_prefix)
+
+# The Go gateway is the primary UI host; serving it here too lets the AI service run standalone.
+FRONTEND_DIR = REPO_ROOT / "frontend"
+if FRONTEND_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> FileResponse:
+        return FileResponse(FRONTEND_DIR / "index.html")

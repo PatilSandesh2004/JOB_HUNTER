@@ -1,33 +1,35 @@
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Float, Boolean, JSON
+from typing import Any
+
+from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
 from ai_service.app.database.session import Base
+from ai_service.app.models._mixins import TimestampMixin
 
 
-# SQLAlchemy ORM Model for storing normalized jobs in PostgreSQL.
-class JobModel(Base):
+class JobModel(TimestampMixin, Base):
     __tablename__ = "jobs"
 
-    id = Column(String, primary_key=True, index=True)
-    title = Column(String, nullable=False, index=True)
-    company = Column(String, nullable=False, index=True)
-    company_id = Column(String, nullable=True)
-    description = Column(Text, nullable=True)
-    location = Column(String, nullable=True)
-    country = Column(String, nullable=True)
-    city = Column(String, nullable=True)
-    workplace_type = Column(String, nullable=True)
-    remote_scope = Column(String, nullable=True)
-    employment_type = Column(String, nullable=True)
-    salary_min = Column(Float, nullable=True)
-    salary_max = Column(Float, nullable=True)
-    salary_currency = Column(String, nullable=True)
-    experience_required = Column(Float, nullable=True)
-    required_skills = Column(JSON, nullable=True)
-    preferred_skills = Column(JSON, nullable=True)
-    visa_sponsorship = Column(JSON, nullable=True)
-    relocation = Column(Boolean, default=False)
-    application_url = Column(String, unique=True, index=True, nullable=False)
-    source = Column(String, nullable=False)
-    source_job_id = Column(String, nullable=True)
-    posted_at = Column(DateTime, nullable=True)
-    scraped_at = Column(DateTime, default=datetime.utcnow)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[str] = mapped_column(String(300), index=True)
+    company: Mapped[str] = mapped_column(String(200), index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    location: Mapped[str] = mapped_column(String(200), default="Unknown")
+    workplace_type: Mapped[str] = mapped_column(String(32), default="UNKNOWN")
+    remote_scope: Mapped[str] = mapped_column(String(48), default="UNKNOWN")
+    employment_type: Mapped[str | None] = mapped_column(String(64))
+    salary_min: Mapped[float | None] = mapped_column(Float)
+    salary_max: Mapped[float | None] = mapped_column(Float)
+    salary_currency: Mapped[str | None] = mapped_column(String(8))
+    experience_required: Mapped[float | None] = mapped_column(Float)
+    required_skills: Mapped[list[str]] = mapped_column(JSON, default=list)
+    visa_sponsorship: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    relocation: Mapped[bool] = mapped_column(Boolean, default=False)
+    application_url: Mapped[str] = mapped_column(String(1000), unique=True, index=True)
+    ats: Mapped[str] = mapped_column(String(32), default="other")
+    source: Mapped[str] = mapped_column(String(64))
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Latest match evaluation against the active candidate (single-user deployment).
+    match: Mapped[dict[str, Any] | None] = mapped_column(JSON)

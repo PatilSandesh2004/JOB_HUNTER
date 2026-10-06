@@ -1,55 +1,54 @@
+// Command server runs the JobPilot HTTP gateway.
 package main
 
 import (
-	"fmt"
-	"log"
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"jobpilot/backend/config"
-	"jobpilot/backend/internal/clients"
-	"jobpilot/backend/internal/handlers"
-	"jobpilot/backend/internal/repository"
+	"jobpilot/backend/internal/config"
+	"jobpilot/backend/internal/server"
 )
 
-func enableCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func main() {
-	cfg := config.LoadConfig()
-	log.Printf("[Modular Go Server] Starting on port %s...", cfg.Port)
-	log.Printf("[Modular Go Server] AI Microservice URL: %s", cfg.AIServiceURL)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	cfg := config.Load()
 
-	aiClient := clients.NewAIClient(cfg.AIServiceURL)
-	appRepo := repository.NewInMemoryApplicationRepo()
-	router := handlers.NewRouterHandler(aiClient, appRepo)
+	srv, err := server.New(cfg, logger)
+	if err != nil {
+		logger.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
 
-	mux := http.NewServeMux()
+	httpServer := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      4 * time.Minute, // searches and form filling can take a while
+		IdleTimeout:       2 * time.Minute,
+	}
 
-	// REST API Endpoints
-	mux.HandleFunc("/api/v1/search/", router.HandleSearch)
-	mux.HandleFunc("/api/v1/applications", router.HandleListApplications)
-	mux.HandleFunc("/api/v1/applications/approve", router.HandleApproveApplication)
-	mux.HandleFunc("/api/v1/applications/auto-apply", router.HandleAutoApply)
-	mux.HandleFunc("/api/v1/health", router.HandleHealth)
+	go func() {
+		logger.Info("gateway listening", "addr", httpServer.Addr, "ai_service", cfg.AIServiceURL, "frontend", cfg.FrontendDir)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
 
-	// Serve Frontend Static Web App
-	fs := http.FileServer(http.Dir("./frontend"))
-	mux.Handle("/", fs)
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
 
-	handler := enableCORS(mux)
-
-	addr := fmt.Sprintf(":%s", cfg.Port)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		log.Fatalf("Server launch failed: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	logger.Info("shutting down")
+	if err := httpServer.Shutdown(ctx); err != nil {
+		logger.Error("graceful shutdown failed", "error", err)
 	}
 }

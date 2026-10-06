@@ -1,65 +1,61 @@
-from typing import List, Optional
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+
 from ai_service.app.models.job import JobModel
 from ai_service.app.schemas.job import NormalizedJob
+from ai_service.app.schemas.match import JobWithMatch, MatchResult
 
 
 class JobRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # Persistence method saving a normalized job to PostgreSQL.
-    async def create_or_update(self, job: NormalizedJob) -> JobModel:
-        stmt = select(JobModel).where(JobModel.application_url == job.application_url)
-        result = await self.session.execute(stmt)
-        existing = result.scalars().first()
-
-        if existing:
-            existing.title = job.title
-            existing.company = job.company
-            existing.description = job.description
-            existing.location = job.location
-            existing.workplace_type = job.workplace_type.value if hasattr(job.workplace_type, "value") else str(job.workplace_type)
-            return existing
-
-        db_job = JobModel(
-            id=job.id,
-            title=job.title,
-            company=job.company,
-            company_id=job.company_id,
-            description=job.description,
-            location=job.location,
-            country=job.country,
-            city=job.city,
-            workplace_type=job.workplace_type.value if hasattr(job.workplace_type, "value") else str(job.workplace_type),
-            remote_scope=job.remote_scope.value if hasattr(job.remote_scope, "value") else str(job.remote_scope),
-            employment_type=job.employment_type,
-            salary_min=job.salary_min,
-            salary_max=job.salary_max,
-            salary_currency=job.salary_currency,
-            experience_required=job.experience_required,
-            required_skills=job.required_skills,
-            preferred_skills=job.preferred_skills,
-            visa_sponsorship=job.visa_sponsorship.model_dump() if hasattr(job.visa_sponsorship, "model_dump") else job.visa_sponsorship,
-            relocation=job.relocation,
-            application_url=job.application_url,
-            source=job.source,
-            source_job_id=job.source_job_id,
-            posted_at=job.posted_at,
-            scraped_at=job.scraped_at,
-        )
-        self.session.add(db_job)
+    async def upsert_many(self, items: list[JobWithMatch]) -> None:
+        if not items:
+            return
+        ids = [item.job.id for item in items]
+        existing = {
+            row.id: row for row in (await self.session.scalars(select(JobModel).where(JobModel.id.in_(ids)))).all()
+        }
+        for item in items:
+            values = _to_columns(item)
+            row = existing.get(item.job.id)
+            if row is None:
+                self.session.add(JobModel(**values))
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
         await self.session.commit()
-        await self.session.refresh(db_job)
-        return db_job
 
-    async def get_by_id(self, job_id: str) -> Optional[JobModel]:
-        stmt = select(JobModel).where(JobModel.id == job_id)
-        result = await self.session.execute(stmt)
-        return result.scalars().first()
+    async def get(self, job_id: str) -> NormalizedJob | None:
+        row = await self.session.get(JobModel, job_id)
+        return to_schema(row).job if row else None
 
-    async def list_jobs(self, limit: int = 50) -> List[JobModel]:
-        stmt = select(JobModel).limit(limit)
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+    async def list_all(self, limit: int = 200) -> list[JobWithMatch]:
+        rows = (await self.session.scalars(select(JobModel).order_by(JobModel.updated_at.desc()).limit(limit))).all()
+        items = [to_schema(row) for row in rows]
+        return sorted(items, key=lambda i: i.match.overall_match if i.match else -1, reverse=True)
+
+    async def clear(self) -> int:
+        rows = (await self.session.scalars(select(JobModel))).all()
+        for row in rows:
+            await self.session.delete(row)
+        await self.session.commit()
+        return len(rows)
+
+
+def _to_columns(item: JobWithMatch) -> dict:
+    data = item.job.model_dump(mode="python", exclude={"scraped_at", "auto_apply_supported"})
+    data["visa_sponsorship"] = item.job.visa_sponsorship.model_dump(mode="json")
+    data["workplace_type"] = item.job.workplace_type.value
+    data["remote_scope"] = item.job.remote_scope.value
+    data["match"] = item.match.model_dump(mode="json") if item.match else None
+    return data
+
+
+def to_schema(row: JobModel) -> JobWithMatch:
+    job = NormalizedJob.model_validate(
+        {c.name: getattr(row, c.name) for c in JobModel.__table__.columns if c.name != "match"}
+        | {"scraped_at": row.updated_at}
+    )
+    return JobWithMatch(job=job, match=MatchResult.model_validate(row.match) if row.match else None)

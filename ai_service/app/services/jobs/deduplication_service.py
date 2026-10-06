@@ -1,33 +1,26 @@
-from typing import List
+"""Remove duplicate postings: exact canonical URL first, then fuzzy title+company similarity."""
+
 from rapidfuzz import fuzz
+
 from ai_service.app.schemas.job import NormalizedJob
 
 
 class JobDeduplicationService:
-    
-    # Deduplication method using exact application URL filtering followed by title & company fuzzy matching.
-    def deduplicate(self, jobs: List[NormalizedJob], similarity_threshold: float = 85.0) -> List[NormalizedJob]:
-        unique_jobs: List[NormalizedJob] = []
-        seen_urls = set()
-        
+    def deduplicate(self, jobs: list[NormalizedJob], similarity_threshold: float = 92.0) -> list[NormalizedJob]:
+        unique: list[NormalizedJob] = []
+        seen_ids: set[str] = set()
+        seen_keys: list[str] = []
+
         for job in jobs:
-            # 1. Exact match on URL
-            if job.application_url in seen_urls:
+            if job.id in seen_ids:
                 continue
-                
-            # 2. Fuzzy match on title + company combination
-            is_duplicate = False
-            for target in unique_jobs:
-                combo1 = f"{job.title} {job.company}".lower()
-                combo2 = f"{target.title} {target.company}".lower()
-                
-                score = fuzz.token_sort_ratio(combo1, combo2)
-                if score >= similarity_threshold:
-                    is_duplicate = True
-                    break
-                    
-            if not is_duplicate:
-                seen_urls.add(job.application_url)
-                unique_jobs.append(job)
-                
-        return unique_jobs
+            key = f"{job.title} {job.company}".lower()
+            # Fuzzy matching only makes sense when we actually know the company.
+            if job.company != "Unknown company" and any(
+                fuzz.token_sort_ratio(key, other) >= similarity_threshold for other in seen_keys
+            ):
+                continue
+            seen_ids.add(job.id)
+            seen_keys.append(key)
+            unique.append(job)
+        return unique

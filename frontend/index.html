@@ -3,211 +3,228 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JobPilot — Modular AI Job Search & Autonomous Application Agent</title>
-    <!-- Google Fonts -->
+    <title>JobPilot</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
-<body class="dark-theme">
-
-    <!-- Top Navigation Bar -->
+<body>
     <header class="navbar">
         <div class="logo-container">
-            <div class="logo-icon">
-                <i class="fa-solid fa-paper-plane"></i>
-            </div>
-            <div class="logo-text">
-                <span class="brand-name">JobPilot</span>
-                <span class="brand-badge">GO + AI MICROSERVICES</span>
-            </div>
+            <div class="logo-icon"><i class="fa-solid fa-paper-plane"></i></div>
+            <span class="brand-name">JobPilot</span>
         </div>
 
-        <nav class="nav-links">
-            <button class="nav-btn active" data-tab="search-tab"><i class="fa-solid fa-magnifying-glass"></i> Job Discovery</button>
-            <button class="nav-btn" data-tab="approval-tab">
-                <i class="fa-solid fa-user-check"></i> Approval Queue
-                <span class="badge-count" id="pending-count">1</span>
+        <nav class="nav-links" aria-label="Sections">
+            <button class="nav-btn active" data-tab="discover-tab"><i class="fa-solid fa-magnifying-glass"></i> Discover</button>
+            <button class="nav-btn" data-tab="applications-tab">
+                <i class="fa-solid fa-user-check"></i> Applications
+                <span class="badge-count" id="review-count" hidden>0</span>
             </button>
-            <button class="nav-btn" data-tab="candidate-tab"><i class="fa-solid fa-id-card"></i> Candidate Profile</button>
-            <button class="nav-btn" data-tab="system-tab"><i class="fa-solid fa-server"></i> System Health</button>
+            <button class="nav-btn" data-tab="profile-tab"><i class="fa-solid fa-id-card"></i> Profile</button>
+            <button class="nav-btn" data-tab="system-tab"><i class="fa-solid fa-server"></i> System</button>
         </nav>
 
         <div class="user-profile">
-            <div class="avatar">JD</div>
+            <div class="avatar" id="nav-avatar">?</div>
             <div class="user-info">
-                <span class="user-name">John Doe</span>
-                <span class="user-role">Senior AI Engineer</span>
+                <span class="user-name" id="nav-name">No profile yet</span>
+                <span class="user-role" id="nav-role">Upload your resume</span>
             </div>
         </div>
     </header>
 
     <main class="main-container">
-
-        <!-- TAB 1: JOB DISCOVERY & MATCHING -->
-        <section id="search-tab" class="tab-content active">
+        <!-- DISCOVER -->
+        <section id="discover-tab" class="tab-content active">
             <div class="hero-card">
                 <div class="hero-content">
-                    <h1>Modular Autonomous Job Search & Smart Matching</h1>
-                    <p>Go Backend coordinates multi-search agents, visa evaluation, normalized listings, and candidate fit.</p>
+                    <h1>Find jobs that fit, then apply with one review</h1>
+                    <p>Searches SearXNG (Greenhouse, Lever, Ashby, Workable), Remotive and Arbeitnow, then ranks every posting against your profile.</p>
                 </div>
 
                 <form id="search-form" class="search-box-group">
-                    <div class="input-field">
+                    <label class="input-field">
                         <i class="fa-solid fa-briefcase"></i>
-                        <input type="text" id="role-input" value="AI Engineer, Software Engineer" placeholder="Target Roles">
-                    </div>
-
-                    <div class="input-field">
+                        <input type="text" id="role-input" placeholder="Roles, comma separated" required>
+                    </label>
+                    <label class="input-field">
                         <i class="fa-solid fa-location-dot"></i>
-                        <input type="text" id="location-input" value="Bengaluru, Remote" placeholder="Locations">
-                    </div>
-
-                    <div class="toggle-field">
-                        <label class="switch">
-                            <input type="checkbox" id="remote-toggle" checked>
-                            <span class="slider round"></span>
+                        <input type="text" id="location-input" placeholder="Locations (or Remote)">
+                    </label>
+                    <div class="toggle-group">
+                        <label class="toggle-field" title="Hide jobs outside these locations (and remote jobs closed to your country)">
+                            <span class="switch"><input type="checkbox" id="exact-toggle" checked><span class="slider"></span></span>
+                            <span class="toggle-label">Only these locations</span>
                         </label>
-                        <span class="toggle-label">Remote Only</span>
+                        <label class="toggle-field">
+                            <span class="switch"><input type="checkbox" id="remote-toggle"><span class="slider"></span></span>
+                            <span class="toggle-label">Remote only</span>
+                        </label>
+                        <label class="toggle-field">
+                            <span class="switch"><input type="checkbox" id="visa-toggle"><span class="slider"></span></span>
+                            <span class="toggle-label">Needs sponsorship</span>
+                        </label>
                     </div>
-
-                    <button type="submit" id="btn-search" class="btn-primary">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i> Execute Agent Search
-                    </button>
+                    <div class="search-buttons">
+                        <button type="submit" id="btn-search" class="btn-primary">
+                            <i class="fa-solid fa-magnifying-glass"></i> Search
+                        </button>
+                        <button type="button" id="btn-auto-search" class="btn-secondary" title="Build searches from your resume: roles, seniority, skills and location">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> From my resume
+                        </button>
+                    </div>
                 </form>
+                <p class="search-hint">Tip: add <strong>Remote</strong> to locations to include remote jobs open to your country.</p>
+                <p class="search-meta" id="search-meta"></p>
             </div>
 
-            <!-- Stats Bar -->
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-icon purple"><i class="fa-solid fa-briefcase"></i></div>
-                    <div class="stat-data">
-                        <span class="stat-value" id="stat-total-jobs">2</span>
-                        <span class="stat-label">Jobs Discovered</span>
-                    </div>
+                    <div><span class="stat-value" id="stat-total">0</span><span class="stat-label">Jobs found</span></div>
                 </div>
-
                 <div class="stat-card">
                     <div class="stat-icon green"><i class="fa-solid fa-bullseye"></i></div>
-                    <div class="stat-data">
-                        <span class="stat-value" id="stat-high-match">2</span>
-                        <span class="stat-label">High Match (&gt;70%)</span>
-                    </div>
+                    <div><span class="stat-value" id="stat-high">0</span><span class="stat-label">Strong matches (70%+)</span></div>
                 </div>
-
                 <div class="stat-card">
                     <div class="stat-icon cyan"><i class="fa-solid fa-passport"></i></div>
-                    <div class="stat-data">
-                        <span class="stat-value" id="stat-visa-jobs">2</span>
-                        <span class="stat-label">Visa Sponsoring</span>
-                    </div>
+                    <div><span class="stat-value" id="stat-visa">0</span><span class="stat-label">Sponsorship confirmed</span></div>
                 </div>
-
                 <div class="stat-card">
-                    <div class="stat-icon amber"><i class="fa-solid fa-clock"></i></div>
-                    <div class="stat-data">
-                        <span class="stat-value" id="stat-pending-apps">1</span>
-                        <span class="stat-label">Awaiting Approval</span>
-                    </div>
+                    <div class="stat-icon amber"><i class="fa-solid fa-paper-plane"></i></div>
+                    <div><span class="stat-value" id="stat-applied">0</span><span class="stat-label">Applied</span></div>
                 </div>
             </div>
 
             <div class="section-header">
-                <h2><i class="fa-solid fa-list-check"></i> Matched Job Feed</h2>
+                <h2><i class="fa-solid fa-list-check"></i> Ranked jobs</h2>
+                <div class="filter-controls" id="job-filters">
+                    <button class="filter-btn active" data-filter="all">All</button>
+                    <button class="filter-btn" data-filter="strong">70%+</button>
+                    <button class="filter-btn" data-filter="remote">Remote</button>
+                    <button class="filter-btn" data-filter="visa">Visa: yes</button>
+                </div>
             </div>
-
-            <div id="jobs-container" class="jobs-grid">
-                <!-- Populated dynamically via JS Modules -->
-            </div>
+            <div id="jobs-container" class="jobs-grid"></div>
         </section>
 
-        <!-- TAB 2: APPROVAL QUEUE -->
-        <section id="approval-tab" class="tab-content">
+        <!-- APPLICATIONS -->
+        <section id="applications-tab" class="tab-content">
             <div class="card-panel">
                 <div class="panel-header">
-                    <h2><i class="fa-solid fa-shield-halved"></i> Human-in-the-Loop Approval Queue</h2>
-                    <p>Playwright agent has auto-filled these application forms. Approve to complete submission.</p>
+                    <h2><i class="fa-solid fa-shield-halved"></i> Application queue</h2>
+                    <p>The agent fills each form and stops. Check the screenshot and cover letter, then approve to submit. Forms with CAPTCHAs or unanswered required questions are handed back to you.</p>
                 </div>
-
-                <div id="approval-queue-list" class="approval-list">
-                    <!-- Populated dynamically -->
-                </div>
+                <div id="applications-list" class="approval-list"></div>
             </div>
         </section>
 
-        <!-- TAB 3: CANDIDATE PROFILE -->
-        <section id="candidate-tab" class="tab-content">
+        <!-- PROFILE -->
+        <section id="profile-tab" class="tab-content">
             <div class="candidate-grid">
                 <div class="card-panel">
                     <div class="panel-header">
-                        <h2><i class="fa-solid fa-user-gear"></i> Candidate Profile</h2>
+                        <h2><i class="fa-solid fa-user-gear"></i> Your profile</h2>
+                        <p>Used to rank jobs and fill application forms. Nothing here is ever invented by the agent.</p>
                     </div>
-
-                    <form id="candidate-form" class="form-layout">
+                    <form id="profile-form" class="form-layout">
                         <div class="form-row">
-                            <div class="form-group">
-                                <label>Full Name</label>
-                                <input type="text" id="cand-name" value="John Doe">
-                            </div>
-                            <div class="form-group">
-                                <label>Email Address</label>
-                                <input type="email" id="cand-email" value="john.doe@example.com">
-                            </div>
+                            <div class="form-group"><label for="p-name">Full name *</label><input id="p-name" required></div>
+                            <div class="form-group"><label for="p-email">Email *</label><input id="p-email" type="email" required></div>
                         </div>
+                        <div class="form-row">
+                            <div class="form-group"><label for="p-phone">Phone</label><input id="p-phone" type="tel"></div>
+                            <div class="form-group"><label for="p-location">Location</label><input id="p-location" placeholder="City, Country"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label for="p-role">Current role</label><input id="p-role"></div>
+                            <div class="form-group"><label for="p-company">Current company</label><input id="p-company"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label for="p-years">Years of experience</label><input id="p-years" type="number" step="0.5" min="0" max="60"></div>
+                            <div class="form-group"><label for="p-linkedin">LinkedIn URL</label><input id="p-linkedin" type="url"></div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group"><label for="p-github">GitHub URL</label><input id="p-github" type="url"></div>
+                            <div class="form-group"><label for="p-portfolio">Portfolio URL</label><input id="p-portfolio" type="url"></div>
+                        </div>
+                        <div class="form-group"><label for="p-skills">Skills (comma separated)</label><textarea id="p-skills" rows="2"></textarea></div>
 
+                        <h3 class="form-section">Job preferences</h3>
+                        <div class="form-row">
+                            <div class="form-group"><label for="p-roles">Target roles</label><input id="p-roles" placeholder="AI Engineer, Backend Engineer"></div>
+                            <div class="form-group"><label for="p-locations">Preferred locations</label><input id="p-locations" placeholder="Bengaluru, Remote"></div>
+                        </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label>Years of Experience</label>
-                                <input type="number" step="0.5" id="cand-exp" value="4.0">
+                                <label for="p-remote">Work arrangement</label>
+                                <select id="p-remote">
+                                    <option value="ANY">Any</option>
+                                    <option value="REMOTE_ONLY">Remote only</option>
+                                    <option value="HYBRID">Hybrid</option>
+                                    <option value="ONSITE">On-site</option>
+                                </select>
                             </div>
                             <div class="form-group">
-                                <label>Visa Sponsorship Required?</label>
-                                <select id="cand-visa">
-                                    <option value="true" selected>Yes - Requires Sponsorship</option>
-                                    <option value="false">No - Authorized</option>
+                                <label for="p-visa">Need visa sponsorship?</label>
+                                <select id="p-visa">
+                                    <option value="false">No</option>
+                                    <option value="true">Yes</option>
                                 </select>
                             </div>
                         </div>
-
-                        <button type="submit" class="btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save Profile</button>
+                        <label class="checkbox-row"><input type="checkbox" id="p-relocate"> Willing to relocate</label>
+                        <button type="submit" class="btn-primary" id="btn-save-profile"><i class="fa-solid fa-floppy-disk"></i> Save profile</button>
                     </form>
+                </div>
+
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <h2><i class="fa-solid fa-file-arrow-up"></i> Resume</h2>
+                        <p>PDF, DOCX or TXT up to 10 MB. It is parsed into the profile and attached to applications.</p>
+                    </div>
+                    <label class="upload-dropzone" id="resume-dropzone">
+                        <input type="file" id="resume-input" accept=".pdf,.docx,.txt" hidden>
+                        <div class="cloud-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                        <strong>Drop your resume here</strong>
+                        <span class="muted">or click to choose a file</span>
+                    </label>
+                    <p class="muted" id="resume-status">No resume uploaded yet.</p>
+                    <div class="resume-preview">
+                        <h4>Detected skills</h4>
+                        <div class="resume-tags" id="skill-tags"></div>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <!-- TAB 4: SYSTEM HEALTH -->
+        <!-- SYSTEM -->
         <section id="system-tab" class="tab-content">
             <div class="card-panel">
                 <div class="panel-header">
-                    <h2><i class="fa-solid fa-network-wired"></i> Microservices Architecture Status</h2>
+                    <h2><i class="fa-solid fa-network-wired"></i> Service health</h2>
+                    <p>Refreshes every time you open this tab.</p>
                 </div>
-
-                <div class="health-grid">
-                    <div class="health-card">
-                        <div class="health-status online"></div>
-                        <div class="health-info">
-                            <h4>Go Core Backend</h4>
-                            <span>http://localhost:8080</span>
-                        </div>
-                        <span class="status-pill status-online">ONLINE (Go 1.22)</span>
-                    </div>
-
-                    <div class="health-card">
-                        <div class="health-status online"></div>
-                        <div class="health-info">
-                            <h4>Python AI Microservice</h4>
-                            <span>http://localhost:8000</span>
-                        </div>
-                        <span class="status-pill status-online">ONLINE (FastAPI + LangGraph)</span>
-                    </div>
-                </div>
+                <div class="health-grid" id="health-grid"></div>
             </div>
         </section>
-
     </main>
+
+    <div class="modal-overlay" id="modal" role="dialog" aria-modal="true">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modal-title"></h3>
+                <button class="close-modal" id="modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toasts" aria-live="polite"></div>
 
     <script type="module" src="/static/js/app.js"></script>
 </body>

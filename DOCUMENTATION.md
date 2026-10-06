@@ -1,110 +1,149 @@
-# 🚀 JobPilot — Master Technical Documentation & Feature Specification
+# JobPilot
 
-JobPilot is a state-of-the-art, modular autonomous job search engine and application agent. It decouples core business logic into a **Go Backend**, an **AI Agent Microservice in Python**, and a **Reactive Glassmorphic Frontend Dashboard**.
+JobPilot finds jobs, ranks them against your profile, writes a tailored cover letter, and fills in
+the application form for you. By default it stops before submitting, so you can review a screenshot of
+the filled form and approve it.
 
----
-
-## 🏗️ 1. Directory Structure & Complete Code Inventory
-
-```
-jobpilot/
-├── frontend/                   # High-Aesthetic Reactive Web UI
-│   ├── index.html              # HTML5 dashboard structure
-│   ├── styles.css              # Dark mode glassmorphic CSS design system
-│   └── js/
-│       ├── app.js              # Application entrypoint
-│       ├── api.js              # Modular REST client to Go Backend
-│       ├── state.js            # Global state manager (Pub/Sub pattern)
-│       └── components/
-│           ├── jobFeed.js      # Job card rendering, match gauges, visa pills
-│           └── approvalQueue.js# Playwright Human-in-the-Loop review list
-│
-├── backend/                    # Go (Golang 1.22) Microservice (Port 8080)
-│   ├── go.mod                  # Go module definition
-│   ├── main.go                 # Compatibility root server entrypoint
-│   ├── cmd/server/main.go      # Production Go server & HTTP multiplexer
-│   ├── config/config.go        # Environment variable loader
-│   └── internal/
-│       ├── auth/
-│       │   └── jwt.go          # JWT Token authentication & verification
-│       ├── models/models.go    # Go domain structs (Job, Candidate, Application)
-│       ├── clients/ai_client.go# HTTP client invoking Python AI Microservice
-│       ├── repository/
-│       │   └── application_repo.go # Thread-safe in-memory data access layer
-│       └── handlers/
-│           ├── handlers.go     # REST API route handlers
-│           └── auth_handler.go # /api/v1/auth/register & /login handlers
-│
-├── ai_service/                 # Python FastAPI AI & Agentic Microservice (Port 8000)
-│   ├── requirements.txt        # Python dependency manifest
-│   ├── app/
-│   │   ├── main.py             # FastAPI entrypoint & router mounting
-│   │   ├── core/config.py      # Groq API & Pydantic settings
-│   │   ├── agents/
-│   │   │   ├── search_agent/   # LangGraph search agent & query re-creator
-│   │   │   └── application_agent/ # LangGraph browser automation agent
-│   │   ├── services/
-│   │   │   ├── matching/matching_engine.py  # 3-stage candidate fit calculator
-│   │   │   ├── visa/visa_service.py         # Natural language visa NLP parser
-│   │   │   ├── applications/tailoring_service.py # LLM cover letter generator
-│   │   │   ├── resume/resume_parser.py      # pdfplumber PDF resume extractor
-│   │   │   ├── search/search_service.py     # Multi-source concurrent job search
-│   │   │   └── notifications/webhook_service.py # Slack/Telegram webhook alerts
-│   │   ├── schemas/            # Pydantic validation schemas
-│   │   ├── models/             # SQLAlchemy ORM models
-│   │   └── integrations/
-│   │       ├── llm/llm_client.py           # Groq LLM API (openai/gpt-oss-120b)
-│   │       ├── browser/playwright_client.py # Async Playwright Chromium agent
-│   │       ├── captcha/captcha_solver.py    # 2Captcha reCAPTCHA solver
-│   │       ├── search/searxng_client.py    # SearXNG metasearch HTTP client
-│   │       └── vector/qdrant_client.py     # Qdrant 384-dim vector embeddings
-│   └── workers/
-│       ├── job_worker.py       # Background periodic discovery worker
-│       └── email_tracker.py    # Employer email response status tracker
-│
-├── docker/
-│   ├── Dockerfile.go           # Alpine multi-stage build for Go backend
-│   └── Dockerfile.ai           # Python slim build with Playwright Chromium
-├── docker-compose.yml          # Full-stack Docker orchestration
-└── .gitignore                  # Production gitignore rules
+```text
+Browser UI ──► Go gateway (:8090) ──► Python AI service (:8000) ──► SearXNG, Remotive, Arbeitnow
+                serves frontend/       FastAPI + LangGraph             Groq LLM
+                proxies /api/*         SQLite / PostgreSQL             Playwright Chromium
 ```
 
----
+## Quick start (Windows, local)
 
-## 🔬 2. Implemented Features & Architecture
+Prerequisites: Python 3.11+, Go 1.22+, and a SearXNG instance with JSON output enabled.
 
-### 2.1 🔑 JWT User Authentication & Multi-Tenancy
-- **File**: `backend/internal/auth/jwt.go` & `backend/internal/handlers/auth_handler.go`
-- **Endpoints**: `/api/v1/auth/register` & `/api/v1/auth/login`
-- **Mechanism**: Generates HMAC SHA256-signed JWT tokens for authenticating candidates across sessions.
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m playwright install chromium
+copy .env.example .env        # then set GROQ_API_KEY and SEARXNG_URL
+powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
+```
 
-### 2.2 🧠 Groq LLM Query Re-creation & Cover Letter Tailoring
-- **File**: `ai_service/app/integrations/llm/llm_client.py`
-- **Model**: Groq `openai/gpt-oss-120b` (loaded via GROQ_API_KEY environment variable)
-- **Mechanism**: Rewrites target roles into optimized search query matrices and generates 3-paragraph tailored cover letters.
+Then open **http://localhost:8090**. You can also run only the AI service, which serves the same UI at
+http://localhost:8000. Its API docs are at http://localhost:8000/docs.
 
-### 2.3 🌐 Multi-Source Job Search Aggregator
-- **File**: `ai_service/app/services/search/search_service.py`
-- **Mechanism**: Concurrently queries **SearXNG Metasearch**, **Remotive Live Remote API**, and **Arbeitnow Job Board API** via `asyncio.gather`.
+### SearXNG
 
-### 2.4 📄 PDF Resume Parser (`pdfplumber`)
-- **File**: `ai_service/app/services/resume/resume_parser.py`
-- **Mechanism**: Extracts text from PDF files, applying regex heuristics for candidate names, emails, phone numbers, experience years, and skill tags.
+The AI service calls `GET /search?format=json`, and SearXNG disables JSON output by default (you get
+HTTP 403). Use [searxng/settings.yml](searxng/settings.yml), or add the following to your own
+`settings.yml`:
 
-### 2.5 🤖 Auto-Apply & Human-in-the-Loop Browser Agent
-- **File**: `ai_service/app/integrations/browser/playwright_client.py`
-- **Modes**:
-  - `auto_submit=False`: Human-in-the-Loop approval queue.
-  - `auto_submit=True`: Automatically clicks form submit buttons and logs submission proof.
+```yaml
+server:
+  limiter: false
+search:
+  formats: [html, json]
+```
 
-### 2.6 📧 Automated Email Status Tracker
-- **File**: `ai_service/workers/email_tracker.py`
-- **Mechanism**: Parses email responses from employers (`"Application Received"`, `"Interview Request"`, `"Regret to inform"`) and updates status to `INTERVIEW_SCHEDULED` or `REJECTED`.
+Search engines rate-limit repeated queries ("too many requests", "CAPTCHA"). When that happens, the
+search response lists the unavailable engines in `errors`, and the UI shows them under the search box.
+Suspensions clear on their own after a few minutes. Enabling more engines (bing, startpage, mojeek)
+makes searches more resilient.
 
-### 2.7 🔔 Instant Notification Webhooks
-- **File**: `ai_service/app/services/notifications/webhook_service.py`
-- **Mechanism**: Delivers Slack, Telegram, or Discord JSON webhooks whenever high-fit jobs (**Match Score > 85%**) are discovered.
+## Using it
 
-### 2.8 🧩 Anti-Captcha Solver Integration
-- **File**: `ai_service/app/integrations/captcha/captcha_solver.py`
-- **Mechanism**: Bypasses reCAPTCHA v2/v3 and Cloudflare challenges on complex ATS portals using 2Captcha API tokens.
+1. **Profile**: upload your resume (PDF/DOCX/TXT). It is parsed with regexes plus Groq structured
+   extraction. Review the fields, set target roles, locations, work arrangement and sponsorship need,
+   then save. Saving re-scores all stored jobs.
+2. **Discover**: search. Queries are expanded by the LLM and targeted at ATS sites (Greenhouse, Lever,
+   Ashby, Workable). Every result is normalised, de-duplicated, scored, and stored.
+3. **Prepare application**: the agent writes a cover letter and fills the form in headless Chromium.
+   The application then appears in **Applications** as *Pending approval*, with a screenshot, the list
+   of filled fields, and any required questions it could not answer.
+4. **Approve & submit**: the agent re-opens the form, fills it with your (possibly edited) letter, and
+   submits. It is marked *Applied* only after a confirmation message is detected.
+
+**Auto-apply** does steps 3 and 4 without the review, but only when every required field is filled and
+there is no visible CAPTCHA. Otherwise the application is handed back to you as *Needs manual*.
+
+### What the agent will not do
+
+- **Invent data.** Unknown fields stay empty, and the cover letter prompt forbids made-up facts.
+- **Bypass CAPTCHAs or log in for you.** Those cases become *Needs manual*.
+- **Answer screening questions** other than visa sponsorship, which it answers from your profile.
+- **Claim success it did not observe.** If a submit click shows no confirmation, the status is
+  *Needs manual* and you are told to check the screenshot before retrying.
+
+## Matching score
+
+| Signal | Weight | How it is computed |
+|---|---|---|
+| Title | 25% | Coverage of your target role's meaningful words (AI/ML/LLM treated as one family), ignoring generic words like "senior" or "engineer" |
+| Skills | 35% | Overlap with skills found in the posting, shrunk toward neutral when the posting lists very few |
+| Experience | 15% | Your years vs. the "N+ years" requirement |
+| Location | 15% | Remote and region restrictions, preferred locations, relocation |
+| Sponsorship | 10% | Explicit evidence only. A posting that says "no sponsorship" fails the hard filter when you need it |
+
+An irrelevant title dampens the whole score. A job that fails a hard filter is capped at 35%.
+Expand "Why this score" on any job card to see the reasons.
+
+## API (prefix `/api/v1`)
+
+| Method & path | Purpose |
+|---|---|
+| `GET /health` | Component status. Through the gateway it also includes gateway and upstream status |
+| `POST /search` | `{roles, locations, remote_only, sponsorship_required, max_results}` → ranked jobs (persisted) |
+| `GET /jobs` · `POST /jobs/rescore` · `DELETE /jobs` | Stored jobs |
+| `GET/PUT /candidates/me` · `POST /candidates/me/resume` | Profile and resume upload |
+| `GET /applications` · `POST /applications` | List; create `{job_id, auto_submit}` (202, runs in background) |
+| `GET/PATCH /applications/{id}` | Read; edit `cover_letter` or set outcome `APPLIED/INTERVIEW/REJECTED/DISMISSED` |
+| `POST /applications/{id}/approve` | Fill and submit (202) |
+| `GET /applications/{id}/screenshot` | PNG of the last form state |
+
+Application statuses: `PROCESSING → PENDING_APPROVAL → SUBMITTING → APPLIED`, or `NEEDS_MANUAL` / `FAILED`.
+
+## Project layout
+
+```text
+ai_service/app/
+  main.py                    FastAPI app, error mapping, startup recovery
+  core/                      settings (.env), logging, domain errors
+  api/deps.py, api/routes/   dependency wiring; health, search, jobs, candidates, applications
+  agents/search_agent/       LangGraph: plan queries → search → normalise/filter → rank
+  agents/application_agent/  LangGraph: prepare cover letter → fill / submit form
+  integrations/              Groq client, SearXNG client, Playwright form filler
+  services/                  search, normalisation, ATS detection, dedupe, skills catalogue,
+                             visa evidence, matching, resume parsing, tailoring, applications, webhooks
+  models/ schemas/ repositories/   SQLAlchemy models, Pydantic contracts, data access
+  workers/                   periodic discovery CLI, employer email classifier
+ai_service/tests/            pytest suite, including real-Chromium tests against a local fixture site
+backend/                     Go gateway: cmd/server, internal/config, internal/server (+ tests)
+frontend/                    static UI (ES modules, no build step)
+docker/, docker-compose.yml  containers: gateway, ai_service, postgres, searxng
+```
+
+## Development
+
+```powershell
+.venv\Scripts\python -m pytest            # Python tests (includes headless browser tests)
+.venv\Scripts\python -m ruff check ai_service; .venv\Scripts\python -m ruff format ai_service
+cd backend; go vet ./...; go test ./...
+```
+
+Periodic discovery, which uses your profile's preferred roles and locations:
+
+```powershell
+.venv\Scripts\python -m ai_service.app.workers.job_worker --once
+.venv\Scripts\python -m ai_service.app.workers.job_worker --interval 3600
+```
+
+## Docker
+
+```bash
+docker compose up --build      # UI on http://localhost:8090, SearXNG on :8081
+```
+
+Compose uses PostgreSQL and its own SearXNG, mounted with `searxng/settings.yml`. Set `SEARXNG_SECRET`
+in your environment.
+
+## Configuration
+
+All settings are environment variables (see [.env.example](.env.example)). The most useful ones:
+`GROQ_API_KEY`, `SEARXNG_URL`, `DATABASE_URL`, `BROWSER_HEADLESS` (set it to `false` to watch the
+agent fill forms), `BROWSER_MAX_CONCURRENCY`, `NOTIFICATION_WEBHOOK_URL` and `HIGH_MATCH_THRESHOLD`.
+The gateway reads `PORT` (default 8090), `AI_SERVICE_URL` and `CORS_ORIGINS`.
+
+Data such as the SQLite database, uploaded resumes and screenshots lives in `./data`, which git ignores.

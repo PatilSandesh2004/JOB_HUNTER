@@ -1,20 +1,16 @@
 FROM golang:1.22-alpine AS builder
-
-WORKDIR /app
-
+WORKDIR /src
 COPY backend/go.mod ./
-RUN go mod download || true
-
+RUN go mod download
 COPY backend/ ./
-COPY frontend/ ./frontend/
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/server
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/server/main.go
-
-FROM alpine:latest
+FROM alpine:3.20
+RUN adduser -D -u 10001 app
 WORKDIR /app
-COPY --from=builder /app/main .
-COPY --from=builder /app/frontend ./frontend
-
-EXPOSE 8080
-
-CMD ["./main"]
+COPY --from=builder /out/gateway ./gateway
+COPY frontend/ ./frontend/
+USER app
+ENV PORT=8090 FRONTEND_DIR=/app/frontend
+EXPOSE 8090
+CMD ["./gateway"]

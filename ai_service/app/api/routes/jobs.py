@@ -1,51 +1,34 @@
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from ai_service.app.database.session import get_db
+from ai_service.app.repositories.candidate_repository import CandidateRepository
 from ai_service.app.repositories.job_repository import JobRepository
-from ai_service.app.schemas.job import NormalizedJob
+from ai_service.app.schemas.match import JobWithMatch
+from ai_service.app.services.matching.matching_engine import MatchingEngineService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.get("/", response_model=List[NormalizedJob])
-async def list_jobs(db: AsyncSession = Depends(get_db)):
-    try:
-        repo = JobRepository(db)
-        db_jobs = await repo.list_jobs()
-        results = []
-        for j in db_jobs:
-            results.append(
-                NormalizedJob(
-                    id=j.id,
-                    title=j.title,
-                    company=j.company,
-                    company_id=j.company_id,
-                    description=j.description or "",
-                    location=j.location or "Unknown",
-                    country=j.country or "Unknown",
-                    city=j.city,
-                    workplace_type=j.workplace_type or "UNKNOWN",
-                    remote_scope=j.remote_scope or "UNKNOWN",
-                    employment_type=j.employment_type or "Full-time",
-                    salary_min=j.salary_min,
-                    salary_max=j.salary_max,
-                    salary_currency=j.salary_currency,
-                    experience_required=j.experience_required,
-                    required_skills=j.required_skills or [],
-                    preferred_skills=j.preferred_skills or [],
-                    visa_sponsorship=j.visa_sponsorship or {"status": "UNKNOWN"},
-                    relocation=j.relocation or False,
-                    application_url=j.application_url,
-                    source=j.source,
-                    source_job_id=j.source_job_id,
-                    posted_at=j.posted_at,
-                    scraped_at=j.scraped_at,
-                )
-            )
-        return results
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch jobs: {str(e)}",
-        )
+@router.get("", response_model=list[JobWithMatch])
+async def list_jobs(limit: int = Query(200, ge=1, le=1000), db: AsyncSession = Depends(get_db)):
+    return await JobRepository(db).list_all(limit)
+
+
+@router.post("/rescore", response_model=list[JobWithMatch])
+async def rescore_jobs(db: AsyncSession = Depends(get_db)):
+    """Re-run matching for stored jobs, e.g. after the profile changed."""
+    repo = JobRepository(db)
+    items = await repo.list_all(limit=1000)
+    candidate = await CandidateRepository(db).get_active()
+    if candidate is None:
+        return items
+    matcher = MatchingEngineService()
+    rescored = [JobWithMatch(job=i.job, match=matcher.evaluate_match(candidate, i.job)) for i in items]
+    await repo.upsert_many(rescored)
+    return await repo.list_all(limit=1000)
+
+
+@router.delete("", status_code=200)
+async def clear_jobs(db: AsyncSession = Depends(get_db)) -> dict[str, int]:
+    return {"deleted": await JobRepository(db).clear()}

@@ -1,12 +1,20 @@
-from typing import Any, Dict, List, TypedDict, Optional
-from ai_service.app.schemas.search import SearchQueryRequest, SearchResultItem
+import operator
+from typing import Annotated, TypedDict
+
+from ai_service.app.schemas.candidate import CandidateProfile
+from ai_service.app.schemas.match import JobWithMatch
+from ai_service.app.schemas.search import RawJobPosting, SearchQueryRequest
 
 
-# LangGraph state typed dictionary tracking the workflow execution state.
-class SearchAgentState(TypedDict):
+class SearchAgentState(TypedDict, total=False):
     request: SearchQueryRequest
-    generated_queries: List[str]
-    current_query_index: int
-    raw_results: List[Dict[str, Any]]
-    normalized_results: List[SearchResultItem]
-    errors: List[str]
+    candidate: CandidateProfile | None
+    roles: list[str]
+    locations: list[str]
+    titles: list[str]  # roles plus related titles suggested from the resume
+    queries: list[str]
+    raw_postings: list[RawJobPosting]
+    verified_postings: list[RawJobPosting]
+    results: list[JobWithMatch]
+    filtered_out: dict[str, int]
+    errors: Annotated[list[str], operator.add]

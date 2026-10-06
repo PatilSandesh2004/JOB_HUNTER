@@ -1,45 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ai_service.app.agents.search_agent.graph import SearchAgent
+from ai_service.app.api.deps import get_notifier, get_search_agent
+from ai_service.app.database.session import get_db
+from ai_service.app.repositories.candidate_repository import CandidateRepository
+from ai_service.app.repositories.job_repository import JobRepository
 from ai_service.app.schemas.search import SearchQueryRequest, SearchResponse
-from ai_service.app.core.config import settings
-from ai_service.app.integrations.search.searxng_client import SearXNGClient
-from ai_service.app.services.search.search_service import SearchService
-from ai_service.app.agents.search_agent.graph import create_search_graph
+from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
 
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-# Dependency injection provider for SearchService instance.
-def get_search_service() -> SearchService:
-    client = SearXNGClient(base_url=settings.searxng_url)
-    return SearchService(searxng_client=client)
-
-
-# Search endpoint executing the LangGraph search agent workflow.
-@router.post("/", response_model=SearchResponse)
-async def execute_job_search(
+@router.post("", response_model=SearchResponse)
+async def search_jobs(
     request: SearchQueryRequest,
-    search_service: SearchService = Depends(get_search_service),
-):
-    try:
-        graph = create_search_graph(search_service=search_service)
-        initial_state = {
-            "request": request,
-            "generated_queries": [],
-            "current_query_index": 0,
-            "raw_results": [],
-            "normalized_results": [],
-            "errors": [],
-        }
-        
-        final_state = await graph.ainvoke(initial_state)
-        
-        return SearchResponse(
-            query=", ".join(request.roles),
-            total_results=len(final_state["normalized_results"]),
-            results=final_state["normalized_results"],
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Search execution failed: {str(e)}",
-        )
+    db: AsyncSession = Depends(get_db),
+    agent: SearchAgent = Depends(get_search_agent),
+    notifier: WebhookNotificationService = Depends(get_notifier),
+) -> SearchResponse:
+    """Discover, normalise, de-duplicate and rank jobs against the active profile, then persist them."""
+    candidate = await CandidateRepository(db).get_active()
+    response = await agent.run(request, candidate)
+    await JobRepository(db).upsert_many(response.results)
+    await notifier.notify_high_matches(response.results)
+    return response

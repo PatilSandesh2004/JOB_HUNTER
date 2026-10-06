@@ -1,33 +1,48 @@
-from typing import List, Optional
+import uuid
+from collections.abc import Iterable
+from typing import Any
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+
 from ai_service.app.models.application import ApplicationModel
+from ai_service.app.schemas.application import ApplicationRead, ApplicationStatus
 
 
 class ApplicationRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, app_data: dict) -> ApplicationModel:
-        db_app = ApplicationModel(**app_data)
-        self.session.add(db_app)
+    async def create(self, **values: Any) -> ApplicationModel:
+        row = ApplicationModel(id=str(uuid.uuid4()), **values)
+        self.session.add(row)
         await self.session.commit()
-        await self.session.refresh(db_app)
-        return db_app
+        await self.session.refresh(row)
+        return row
 
-    async def update_status(self, app_id: str, status: str, confirmation: Optional[str] = None) -> Optional[ApplicationModel]:
-        stmt = select(ApplicationModel).where(ApplicationModel.id == app_id)
-        result = await self.session.execute(stmt)
-        app = result.scalars().first()
-        if app:
-            app.status = status
-            if confirmation:
-                app.confirmation = confirmation
-            await self.session.commit()
-            await self.session.refresh(app)
-        return app
+    async def get(self, application_id: str) -> ApplicationModel | None:
+        return await self.session.get(ApplicationModel, application_id)
 
-    async def list_by_candidate(self, candidate_id: str) -> List[ApplicationModel]:
-        stmt = select(ApplicationModel).where(ApplicationModel.candidate_id == candidate_id)
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+    async def update(self, row: ApplicationModel, **values: Any) -> ApplicationModel:
+        for key, value in values.items():
+            setattr(row, key, value)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return row
+
+    async def list_all(self, statuses: Iterable[ApplicationStatus] | None = None) -> list[ApplicationModel]:
+        stmt = select(ApplicationModel).order_by(ApplicationModel.created_at.desc())
+        if statuses:
+            stmt = stmt.where(ApplicationModel.status.in_([s.value for s in statuses]))
+        return list((await self.session.scalars(stmt)).all())
+
+    async def find_open_for_job(self, job_id: str) -> ApplicationModel | None:
+        closed = [ApplicationStatus.DISMISSED.value, ApplicationStatus.FAILED.value]
+        stmt = select(ApplicationModel).where(ApplicationModel.job_id == job_id, ApplicationModel.status.not_in(closed))
+        return (await self.session.scalars(stmt)).first()
+
+
+def to_schema(row: ApplicationModel) -> ApplicationRead:
+    read = ApplicationRead.model_validate(row)
+    read.has_screenshot = bool(row.screenshot_path)
+    return read

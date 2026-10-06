@@ -1,65 +1,78 @@
-from enum import Enum
-from typing import List, Optional
-from datetime import datetime
-from pydantic import BaseModel, Field
+from datetime import UTC, datetime
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
-# Granular enum defining precise remote work scopes.
-class RemoteScope(str, Enum):
-    REMOTE_WORLDWIDE = "REMOTE_WORLDWIDE"
-    REMOTE_US_ONLY = "REMOTE_US_ONLY"
-    REMOTE_EU_ONLY = "REMOTE_EU_ONLY"
-    REMOTE_UK_ONLY = "REMOTE_UK_ONLY"
-    REMOTE_INDIA_ONLY = "REMOTE_INDIA_ONLY"
-    REMOTE_ASIA = "REMOTE_ASIA"
-    REMOTE_TIMEZONE_RESTRICTED = "REMOTE_TIMEZONE_RESTRICTED"
+class WorkplaceType(StrEnum):
+    REMOTE = "REMOTE"
     HYBRID = "HYBRID"
     ONSITE = "ONSITE"
     UNKNOWN = "UNKNOWN"
 
 
-# Visa sponsorship status enum with strict non-guessing requirements.
-class VisaSponsorshipStatus(str, Enum):
+class RemoteScope(StrEnum):
+    WORLDWIDE = "WORLDWIDE"
+    US_ONLY = "US_ONLY"
+    EU_ONLY = "EU_ONLY"
+    UK_ONLY = "UK_ONLY"
+    INDIA_ONLY = "INDIA_ONLY"
+    ASIA = "ASIA"
+    TIMEZONE_RESTRICTED = "TIMEZONE_RESTRICTED"
+    NOT_REMOTE = "NOT_REMOTE"
+    UNKNOWN = "UNKNOWN"
+
+
+class VisaSponsorshipStatus(StrEnum):
     YES = "YES"
     NO = "NO"
     UNKNOWN = "UNKNOWN"
 
 
-# Structure tracking explicit evidence for visa sponsorship status.
+class Confidence(StrEnum):
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
 class VisaSponsorshipEvidence(BaseModel):
+    """Sponsorship status backed by an explicit quote; never guessed."""
+
     status: VisaSponsorshipStatus = VisaSponsorshipStatus.UNKNOWN
-    evidence: Optional[str] = None
-    source_url: Optional[str] = None
-    confidence: str = "LOW"  # HIGH, MEDIUM, LOW
+    evidence: str | None = None
+    source_url: str | None = None
+    confidence: Confidence = Confidence.LOW
 
 
-# Comprehensive Pydantic model for normalized job listings across all sources.
 class NormalizedJob(BaseModel):
-    id: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
     title: str
     company: str
-    company_id: Optional[str] = None
     description: str = ""
     location: str = "Unknown"
-    country: str = "Unknown"
-    city: Optional[str] = None
-    company_location: Optional[str] = None
-    job_location: Optional[str] = None
-    workplace_type: RemoteScope = RemoteScope.UNKNOWN
+    workplace_type: WorkplaceType = WorkplaceType.UNKNOWN
     remote_scope: RemoteScope = RemoteScope.UNKNOWN
-    employment_type: str = "Full-time"
-    salary_min: Optional[float] = None
-    salary_max: Optional[float] = None
-    salary_currency: Optional[str] = "USD"
-    experience_required: Optional[int] = None
-    required_skills: List[str] = Field(default_factory=list)
-    preferred_skills: List[str] = Field(default_factory=list)
-    responsibilities: List[str] = Field(default_factory=list)
-    qualifications: List[str] = Field(default_factory=list)
+    employment_type: str | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    experience_required: float | None = None
+    required_skills: list[str] = Field(default_factory=list)
     visa_sponsorship: VisaSponsorshipEvidence = Field(default_factory=VisaSponsorshipEvidence)
     relocation: bool = False
     application_url: str
+    ats: str = "other"
     source: str = "searxng"
-    source_job_id: Optional[str] = None
-    posted_at: Optional[datetime] = None
-    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+    verified: bool = False  # details confirmed through the ATS's API
+    posted_at: datetime | None = None
+    scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @computed_field
+    @property
+    def auto_apply_supported(self) -> bool:
+        """The browser agent can fill this site's form; otherwise only manual apply is offered."""
+        from ai_service.app.services.jobs.ats import detect_ats
+
+        return detect_ats(self.application_url).auto_apply_supported

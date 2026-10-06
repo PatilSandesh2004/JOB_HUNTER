@@ -1,56 +1,91 @@
-import os
+"""Groq chat-completions client with a model fallback chain and JSON-mode helper."""
+
+import json
 import logging
-from typing import Optional, List
-from groq import AsyncGroq
-from ai_service.app.core.config import settings
+import re
+from typing import Any
+
+from ai_service.app.core.config import Settings, settings
+from ai_service.app.core.errors import LLMUnavailableError
 
 logger = logging.getLogger("jobpilot.llm")
 
+_JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+
 
 class LLMClient:
-    """
-    LLM Client powered by Groq API (openai/gpt-oss-120b / qwen/qwen3.8-27b).
-    Generates dynamic, job-specific cover letters and query expansions.
-    """
+    def __init__(self, config: Settings = settings) -> None:
+        self._config = config
+        self._models = list(dict.fromkeys([config.groq_model, *config.groq_fallback_models]))
+        self._client = None
+        if config.llm_enabled:
+            from groq import AsyncGroq
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None) -> None:
-        self.api_key = api_key or settings.groq_api_key or os.environ.get("GROQ_API_KEY", "")
-        self.primary_model = model or settings.groq_model or "openai/gpt-oss-120b"
-        self.fallback_models = [self.primary_model, "qwen/qwen3.8-27b", "allam-2-7b"]
-        
-        if self.api_key:
+            self._client = AsyncGroq(api_key=config.groq_api_key)
+
+    @property
+    def available(self) -> bool:
+        return self._client is not None
+
+    @property
+    def primary_model(self) -> str:
+        return self._models[0]
+
+    async def complete(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        json_mode: bool = False,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Return the first non-empty completion across the model chain, or raise LLMUnavailableError."""
+        if self._client is None:
+            raise LLMUnavailableError("GROQ_API_KEY is not configured")
+
+        last_error: Exception | None = None
+        for model in self._models:
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": self._config.llm_temperature if temperature is None else temperature,
+                "max_tokens": max_tokens or self._config.llm_max_tokens,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+            if model.startswith("openai/gpt-oss"):
+                # Reasoning tokens count against max_tokens; extraction/writing needs little of it.
+                kwargs["reasoning_effort"] = "low"
             try:
-                self.groq_client = AsyncGroq(api_key=self.api_key)
-            except Exception as e:
-                logger.error(f"Failed initializing Groq client: {e}")
-                self.groq_client = None
-        else:
-            self.groq_client = None
+                response = await self._client.chat.completions.create(**kwargs)
+                content = (response.choices[0].message.content or "").strip()
+                if content:
+                    return content
+                last_error = ValueError(f"empty completion from {model}")
+            except Exception as exc:  # provider errors vary; try the next model
+                last_error = exc
+                logger.warning("LLM call failed on model %s: %s", model, exc)
 
-    async def generate_completion(self, system_prompt: str, user_prompt: str) -> str:
-        if self.groq_client:
-            for model_name in self.fallback_models:
-                try:
-                    response = await self.groq_client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        temperature=0.7,
-                        max_tokens=1024,
-                    )
-                    content = response.choices[0].message.content or ""
-                    if content.strip():
-                        return content
-                except Exception as e:
-                    logger.warning(f"Groq API call failed for model '{model_name}': {e}")
+        raise LLMUnavailableError(f"All LLM models failed: {last_error}")
 
-        # Emergency fallback if all API calls fail
-        return (
-            f"Dear Hiring Manager,\n\n"
-            f"I am writing to express my enthusiastic interest in your open position. "
-            f"With extensive hands-on experience in software engineering, artificial intelligence systems, "
-            f"and high-performance backend architectures, I am well-equipped to drive immediate impact for your team.\n\n"
-            f"Sincerely,\nJobPilot Applicant"
-        )
+    async def complete_json(self, system_prompt: str, user_prompt: str, **kwargs: Any) -> dict[str, Any]:
+        raw = await self.complete(system_prompt, user_prompt, json_mode=True, **kwargs)
+        return parse_json_object(raw)
+
+
+def parse_json_object(text: str) -> dict[str, Any]:
+    """Parse a JSON object from model output, tolerating code fences or surrounding prose."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        match = _JSON_OBJECT.search(text)
+        if not match:
+            raise LLMUnavailableError("LLM did not return JSON") from None
+        value = json.loads(match.group(0))
+    if not isinstance(value, dict):
+        raise LLMUnavailableError("LLM returned JSON that is not an object")
+    return value

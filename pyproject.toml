@@ -1,0 +1,27 @@
+[project]
+name = "jobpilot-ai-service"
+version = "0.2.0"
+description = "JobPilot AI microservice: job discovery, matching, and assisted application filling."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["ai_service/tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [".venv", "vevn"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC"]
+ignore = ["B008"]  # FastAPI's Depends() in defaults is idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+"ai_service/app/integrations/browser/form_filler.py" = ["E501"]  # embedded JavaScript
+
+[tool.ruff.lint.isort]
+known-first-party = ["ai_service"]
