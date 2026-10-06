@@ -51,6 +51,16 @@ class JobEnrichmentService:
         kept = [p for p in outcomes if p is not None]
         return kept, len(postings) - len(kept)
 
+    async def check_open(self, urls: list[str]) -> list[bool | None]:
+        """Per URL: True if the board confirms the posting is open, False if it is gone, None if unknown."""
+        postings = [RawJobPosting(title="", url=url, source="recheck") for url in urls]
+        ashby_boards: dict[str, asyncio.Task] = {}
+        async with httpx.AsyncClient(
+            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport
+        ) as client:
+            outcomes = await asyncio.gather(*(self._enrich_one(p, client, ashby_boards) for p in postings))
+        return [False if o is None else (True if o.verified else None) for o in outcomes]
+
     async def _enrich_one(
         self, posting: RawJobPosting, client: httpx.AsyncClient, ashby_boards: dict[str, asyncio.Task]
     ) -> RawJobPosting | None:

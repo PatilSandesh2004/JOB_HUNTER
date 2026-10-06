@@ -83,12 +83,55 @@ async function blobUrl(path) {
     return URL.createObjectURL(await response.blob());
 }
 
+/**
+ * POST /search/stream: calls onStage({stage, label, detail}) as each step finishes, resolves with the
+ * SearchResponse. Server-Sent Events are parsed by hand because EventSource cannot POST or send headers.
+ */
+async function searchStream(params, onStage) {
+    const response = await authedFetch(`${BASE}/search/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+    });
+    if (!response.ok) throw await errorFrom(response);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result = null;
+    const handle = (block) => {
+        const fields = Object.fromEntries(block.split('\n').map((line) => {
+            const at = line.indexOf(': ');
+            return [line.slice(0, at), line.slice(at + 2)];
+        }));
+        const data = JSON.parse(fields.data || 'null');
+        if (fields.event === 'stage') onStage(data);
+        else if (fields.event === 'result') result = data;
+        else if (fields.event === 'error') throw new ApiError(data?.detail || 'Search failed', 500);
+    };
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let end;
+        while ((end = buffer.indexOf('\n\n')) >= 0) {
+            handle(buffer.slice(0, end));
+            buffer = buffer.slice(end + 2);
+        }
+    }
+    if (buffer.trim()) handle(buffer.trim());
+    if (!result) throw new ApiError('The search ended without a result. Try again.', 0);
+    return result;
+}
+
 export const api = {
     health: () => request('/health'),
 
     search: (params) => request('/search', { method: 'POST', body: params }),
+    searchStream,
     listJobs: () => request('/jobs'),
     rescoreJobs: () => request('/jobs/rescore', { method: 'POST' }),
+    recheckJobs: () => request('/jobs/recheck?force=true', { method: 'POST' }),
 
     getProfile: () => request('/candidates/me'),
     saveProfile: (profile) => request('/candidates/me', { method: 'PUT', body: profile }),

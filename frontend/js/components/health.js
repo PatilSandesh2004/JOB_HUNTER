@@ -19,7 +19,10 @@ export function renderHealth(container, health, error) {
         cards.push(card('SearXNG', c.searxng.ok, c.searxng.ok ? c.searxng.url : `Unreachable at ${c.searxng.url}`));
     }
     if (c.llm) cards.push(card('Groq LLM', c.llm.ok, c.llm.ok ? c.llm.model : 'GROQ_API_KEY not set; template letters only'));
-    if (c.browser) cards.push(card('Browser agent', c.browser.ok, c.browser.headless ? 'Chromium (headless)' : 'Chromium (visible)'));
+    if (c.browser) {
+        const mode = c.browser.headless ? 'Chromium (headless)' : 'Chromium (visible)';
+        cards.push(card('Browser agent', c.browser.ok, c.browser.ok ? mode : c.browser.detail));
+    }
     container.innerHTML = cards.join('');
 }
 

@@ -33,3 +33,8 @@ class JobModel(TimestampMixin, Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Latest match evaluation against the active candidate (single-user deployment).
     match: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    # match["overall_match"] as a column, so listing can sort and page in SQL.
+    overall_match: Mapped[float | None] = mapped_column(Float, index=True)
+    # Set when the job board reports the posting gone; cleared if a search finds it open again.
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

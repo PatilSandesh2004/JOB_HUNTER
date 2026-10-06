@@ -9,6 +9,7 @@ resume (titles, seniority, strongest skills), so "Search from my resume" needs n
 import logging
 import re
 from collections import Counter
+from collections.abc import AsyncIterator
 
 from langgraph.graph import END, START, StateGraph
 
@@ -18,7 +19,7 @@ from ai_service.app.integrations.llm.llm_client import LLMClient
 from ai_service.app.schemas.candidate import CandidateProfile, RemotePreference
 from ai_service.app.schemas.job import VisaSponsorshipStatus, WorkplaceType
 from ai_service.app.schemas.match import JobWithMatch
-from ai_service.app.schemas.search import SearchQueryRequest, SearchResponse
+from ai_service.app.schemas.search import SearchProgress, SearchQueryRequest, SearchResponse
 from ai_service.app.services.jobs.deduplication_service import JobDeduplicationService
 from ai_service.app.services.jobs.enrichment_service import JobEnrichmentService
 from ai_service.app.services.jobs.location_service import CITIES, LocationFit, LocationMatcher
@@ -53,6 +54,30 @@ Return JSON {{"titles": [...], "queries": [...]}}:
 
 class SearchInputError(JobPilotError):
     pass
+
+
+STAGE_LABELS = {
+    "plan_queries": "Planning searches",
+    "search_sources": "Searching job boards",
+    "verify_postings": "Verifying postings with the job boards",
+    "normalize_and_filter": "De-duplicating and filtering",
+    "rank": "Ranking against your profile",
+}
+
+
+def _describe(stage: str, update: dict) -> str:
+    if stage == "plan_queries":
+        return f"{len(update.get('queries', []))} queries"
+    if stage == "search_sources":
+        return f"{len(update.get('raw_postings', []))} postings found"
+    if stage == "verify_postings":
+        closed = (update.get("filtered_out") or {}).get("closed", 0)
+        return f"{len(update.get('verified_postings', []))} verified, {closed} closed"
+    if stage == "normalize_and_filter":
+        return f"{len(update.get('results', []))} jobs kept"
+    if stage == "rank":
+        return f"{len(update.get('results', []))} ranked"
+    return ""
 
 
 def resolve_targets(request: SearchQueryRequest, candidate: CandidateProfile | None) -> tuple[list[str], list[str]]:
@@ -113,21 +138,38 @@ class SearchAgent:
         self.graph = self._build()
 
     async def run(self, request: SearchQueryRequest, candidate: CandidateProfile | None) -> SearchResponse:
+        state: SearchAgentState = await self.graph.ainvoke(self.initial_state(request, candidate))
+        return self.response(state)
+
+    def initial_state(self, request: SearchQueryRequest, candidate: CandidateProfile | None) -> SearchAgentState:
+        """Resolve roles/locations up front so bad input fails before any streaming starts."""
         roles, locations = resolve_targets(request, candidate)
-        state: SearchAgentState = await self.graph.ainvoke(
-            {
-                "request": request,
-                "candidate": candidate,
-                "roles": roles,
-                "locations": locations,
-                "errors": [],
-                "filtered_out": {},
-            }
-        )
+        return {
+            "request": request,
+            "candidate": candidate,
+            "roles": roles,
+            "locations": locations,
+            "errors": [],
+            "filtered_out": {},
+        }
+
+    async def stream(self, state: SearchAgentState) -> AsyncIterator[SearchProgress | SearchResponse]:
+        """Yield a progress update after each stage, then the final response."""
+        final: SearchAgentState = state
+        async for mode, chunk in self.graph.astream(state, stream_mode=["updates", "values"]):
+            if mode == "values":
+                final = chunk
+                continue
+            for node, update in chunk.items():
+                yield SearchProgress(stage=node, label=STAGE_LABELS.get(node, node), detail=_describe(node, update))
+        yield self.response(final)
+
+    @staticmethod
+    def response(state: SearchAgentState) -> SearchResponse:
         return SearchResponse(
-            roles=roles,
-            locations=locations,
-            titles=state.get("titles", roles),
+            roles=state["roles"],
+            locations=state["locations"],
+            titles=state.get("titles", state["roles"]),
             queries=state["queries"],
             total_raw=len(state["raw_postings"]),
             total_results=len(state["results"]),

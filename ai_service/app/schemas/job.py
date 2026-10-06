@@ -67,6 +67,7 @@ class NormalizedJob(BaseModel):
     source: str = "searxng"
     verified: bool = False  # details confirmed through the ATS's API
     posted_at: datetime | None = None
+    closed_at: datetime | None = None  # the job board reported the posting gone
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @computed_field

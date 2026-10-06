@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from ai_service.app.api.deps import get_application_service
+from ai_service.app.api.deps import get_application_service, get_task_runner
 from ai_service.app.api.routes import applications, candidates, health, jobs, search
 from ai_service.app.core.config import REPO_ROOT, settings
 from ai_service.app.core.errors import JobPilotError, LLMUnavailableError, NotFoundError, ResumeParseError
@@ -33,9 +33,12 @@ async def lifespan(_: FastAPI):
     await init_db()
     recovered = await get_application_service().recover_interrupted()
     if recovered:
-        logger.warning("Marked %d interrupted application(s) as FAILED", recovered)
+        logger.warning("Recovered %d application(s) interrupted by the last shutdown", recovered)
+    runner = get_task_runner()
+    await runner.start()
     logger.info("JobPilot AI service ready (SearXNG: %s, LLM: %s)", settings.searxng_url, settings.llm_enabled)
     yield
+    await runner.stop()
 
 
 app = FastAPI(title=f"{settings.app_name} AI Service", version=settings.app_version, lifespan=lifespan)

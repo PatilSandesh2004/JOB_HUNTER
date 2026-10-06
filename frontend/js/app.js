@@ -96,11 +96,18 @@ async function runSearch(button, { fromResume = false } = {}) {
     if (!fromResume && !params.roles.length) return toast('Enter at least one role, or use "From my resume"', 'warn');
 
     setBusy(button, true, 'Searching…');
+    $('search-meta').title = '';
     $('search-meta').textContent = fromResume
-        ? 'Building searches from your resume (roles, seniority, skills, location) and verifying each posting…'
-        : 'Searching job boards, verifying postings and ranking them. This usually takes 15-45 seconds.';
+        ? 'Building searches from your resume (roles, seniority, skills, location)…'
+        : 'Planning searches…';
+    // Each finished stage is appended as it streams in: "✓ Searching job boards (54 postings found) · …"
+    const done = [];
+    const showProgress = (stage) => {
+        done.push(`✓ ${stage.label}${stage.detail ? ` (${stage.detail})` : ''}`);
+        $('search-meta').textContent = `${done.join(' · ')} …`;
+    };
     try {
-        const result = await api.search(params);
+        const result = await api.searchStream(params, showProgress);
         // Show exactly this search's results; older searches stay stored but out of the way.
         store.set({ jobs: result.results, jobFilter: 'all' });
         document.querySelectorAll('.filter-btn').forEach((b) => b.classList.toggle('active', b.dataset.filter === 'all'));
@@ -332,6 +339,22 @@ function prefillSearch(profile) {
 }
 
 // ---------------------------------------------------------------- health & modal
+$('btn-recheck').addEventListener('click', async () => {
+    const button = $('btn-recheck');
+    setBusy(button, true, 'Checking�');
+    try {
+        const { checked, closed, unknown } = await api.recheckJobs();
+        toast(checked
+            ? `Checked ${checked} posting(s): ${closed} closed${unknown ? `, ${unknown} could not be verified` : ''}`
+            : 'No postings to check (only Greenhouse, Lever, Ashby and Workable can be verified)', 'success');
+        if (closed) store.set({ jobs: await api.listJobs() });
+    } catch (err) {
+        toast(`Re-check failed: ${err.message}`, 'error');
+    } finally {
+        setBusy(button, false);
+    }
+});
+
 async function loadHealth() {
     try {
         renderHealth($('health-grid'), await api.health());

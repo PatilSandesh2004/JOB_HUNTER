@@ -1,13 +1,20 @@
+import json
+import logging
+from collections.abc import AsyncIterator
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_service.app.agents.search_agent.graph import SearchAgent
 from ai_service.app.api.deps import get_notifier, get_search_agent
-from ai_service.app.database.session import get_db
+from ai_service.app.database.session import AsyncSessionLocal, get_db
 from ai_service.app.repositories.candidate_repository import CandidateRepository
 from ai_service.app.repositories.job_repository import JobRepository
-from ai_service.app.schemas.search import SearchQueryRequest, SearchResponse
+from ai_service.app.schemas.search import SearchProgress, SearchQueryRequest, SearchResponse
 from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
+
+logger = logging.getLogger("jobpilot.search")
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -22,6 +29,44 @@ async def search_jobs(
     """Discover, normalise, de-duplicate and rank jobs against the active profile, then persist them."""
     candidate = await CandidateRepository(db).get_active()
     response = await agent.run(request, candidate)
-    await JobRepository(db).upsert_many(response.results)
+    await JobRepository(db).upsert_many(response.results, checked=True)
     await notifier.notify_high_matches(response.results)
     return response
+
+
+@router.post("/stream", response_class=StreamingResponse)
+async def search_jobs_stream(
+    request: SearchQueryRequest,
+    agent: SearchAgent = Depends(get_search_agent),
+    notifier: WebhookNotificationService = Depends(get_notifier),
+) -> StreamingResponse:
+    """Same as `POST /search`, streamed as Server-Sent Events.
+
+    Emits `stage` events (`{stage, label, detail}`) as each step finishes, then one `result` event with the
+    SearchResponse, or an `error` event (`{detail}`) if the search fails part-way.
+    """
+    async with AsyncSessionLocal() as session:
+        candidate = await CandidateRepository(session).get_active()
+    state = agent.initial_state(request, candidate)  # invalid input -> 400 before the stream starts
+
+    async def events() -> AsyncIterator[str]:
+        try:
+            async for item in agent.stream(state):
+                if isinstance(item, SearchProgress):
+                    yield _sse("stage", item.model_dump_json())
+                    continue
+                async with AsyncSessionLocal() as session:
+                    await JobRepository(session).upsert_many(item.results, checked=True)
+                await notifier.notify_high_matches(item.results)
+                yield _sse("result", item.model_dump_json())
+        except Exception as exc:
+            logger.exception("Streamed search failed")
+            yield _sse("error", json.dumps({"detail": f"Search failed: {exc}"}))
+
+    # X-Accel-Buffering stops reverse proxies (nginx) from holding events back.
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return StreamingResponse(events(), media_type="text/event-stream", headers=headers)
+
+
+def _sse(event: str, data: str) -> str:
+    return f"event: {event}\ndata: {data}\n\n"

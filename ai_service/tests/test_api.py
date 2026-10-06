@@ -1,50 +1,6 @@
 """End-to-end API flow: profile -> resume -> search -> apply (preview) -> approve -> submitted."""
 
-import httpx
-import pytest
-
-from ai_service.app.agents.application_agent.graph import ApplicationAgent
-from ai_service.app.agents.search_agent.graph import SearchAgent
-from ai_service.app.api import deps
-from ai_service.app.database.session import AsyncSessionLocal, init_db
-from ai_service.app.integrations.browser.form_filler import FillOutcome, FillResult
-from ai_service.app.main import app
-from ai_service.app.services.applications.application_service import ApplicationService
-from ai_service.app.services.applications.tailoring_service import ApplicationTailoringService
-from ai_service.tests.fakes import FakeSearchService, offline_llm
-
-RESUME = b"""Asha Rao
-asha.rao@example.com | +91 98765 43210
-Backend Engineer, Acme Corp   Jan 2020 - Present
-Python, FastAPI, PostgreSQL, LangGraph, Docker
-"""
-
-
-class RecordingFiller:
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    async def __call__(self, url, packet, *, submit, screenshot_path):
-        self.calls.append({"url": url, "submit": submit, "packet": packet})
-        if submit:
-            return FillResult(FillOutcome.SUBMITTED, {"Email": "email"}, confirmation="Thank you for applying!")
-        return FillResult(FillOutcome.FILLED, {"Email": "email", "First Name": "first_name"})
-
-
-@pytest.fixture
-async def client():
-    filler = RecordingFiller()
-    llm = offline_llm()
-    app.dependency_overrides[deps.get_search_agent] = lambda: SearchAgent(FakeSearchService(), llm)
-    app.dependency_overrides[deps.get_application_service] = lambda: ApplicationService(
-        AsyncSessionLocal, lambda: ApplicationAgent(ApplicationTailoringService(llm), filler=filler)
-    )
-    app.dependency_overrides[deps.get_resume_parser] = lambda: deps.ResumeParserService(llm)
-    await init_db()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
-        c.filler = filler
-        yield c
-    app.dependency_overrides.clear()
+from ai_service.tests.fakes import RESUME
 
 
 async def test_full_application_flow(client):
@@ -71,10 +27,12 @@ async def test_full_application_flow(client):
     stored = (await client.get("/api/v1/jobs")).json()
     assert {j["job"]["id"] for j in stored} >= {r["job"]["id"] for r in search["results"]}
 
-    # 4. Create application -> background preview fill -> awaiting approval, nothing submitted.
+    # 4. Create application -> queued preview fill -> awaiting approval, nothing submitted.
     created = await client.post("/api/v1/applications", json={"job_id": top["job"]["id"]})
     assert created.status_code == 202
+    assert created.json()["status"] == "PROCESSING"
     app_id = created.json()["id"]
+    assert await client.runner.run_due_once() == 1
     application = (await client.get(f"/api/v1/applications/{app_id}")).json()
     assert application["status"] == "PENDING_APPROVAL"
     assert application["cover_letter_source"] == "template"  # LLM offline in tests
@@ -85,6 +43,8 @@ async def test_full_application_flow(client):
     await client.patch(f"/api/v1/applications/{app_id}", json={"cover_letter": "Edited letter"})
     approved = await client.post(f"/api/v1/applications/{app_id}/approve")
     assert approved.status_code == 202
+    assert approved.json()["status"] == "SUBMITTING"
+    await client.runner.run_due_once()
     final = (await client.get(f"/api/v1/applications/{app_id}")).json()
     assert final["status"] == "APPLIED"
     assert final["applied_at"] is not None
@@ -113,6 +73,7 @@ async def test_manual_apply_flow(client):
     calls_before = len(client.filler.calls)
     manual = await client.post("/api/v1/applications", json={"job_id": remotive["id"], "mode": "manual"})
     assert manual.status_code == 202
+    await client.runner.run_due_once()
     app = (await client.get(f"/api/v1/applications/{manual.json()['id']}")).json()
     assert app["status"] == "AWAITING_CONFIRMATION" and app["mode"] == "manual"
     assert app["cover_letter"]  # drafted for pasting into the company form
@@ -125,6 +86,9 @@ async def test_manual_apply_flow(client):
     acme = by_company["Acme"]
     assert acme["auto_apply_supported"] is True
     prepared = (await client.post("/api/v1/applications", json={"job_id": acme["id"]})).json()
+    busy = await client.post("/api/v1/applications", json={"job_id": acme["id"], "mode": "manual"})
+    assert busy.status_code == 409  # the agent has not run yet
+    await client.runner.run_due_once()
     switched = (await client.post("/api/v1/applications", json={"job_id": acme["id"], "mode": "manual"})).json()
     assert switched["id"] == prepared["id"] and switched["status"] == "AWAITING_CONFIRMATION"
     dismissed = await client.patch(f"/api/v1/applications/{prepared['id']}", json={"status": "DISMISSED"})

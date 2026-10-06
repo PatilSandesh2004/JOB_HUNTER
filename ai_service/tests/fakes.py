@@ -1,8 +1,15 @@
 """Test doubles for external systems."""
 
 from ai_service.app.core.config import settings
+from ai_service.app.integrations.browser.form_filler import FillOutcome, FillResult
 from ai_service.app.integrations.llm.llm_client import LLMClient
 from ai_service.app.schemas.search import RawJobPosting
+
+RESUME = b"""Asha Rao
+asha.rao@example.com | +91 98765 43210
+Backend Engineer, Acme Corp   Jan 2020 - Present
+Python, FastAPI, PostgreSQL, LangGraph, Docker
+"""
 
 FAKE_POSTINGS = [
     RawJobPosting(
@@ -68,3 +75,21 @@ class FakeSearchService:
 
 def offline_llm() -> LLMClient:
     return LLMClient(settings.model_copy(update={"groq_api_key": ""}))
+
+
+class RecordingFiller:
+    """Stands in for the Playwright form filler. Queue results in `script` to control outcomes."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.script: list[FillResult] = []
+
+    async def __call__(self, url, packet, *, submit, screenshot_path):
+        self.calls.append({"url": url, "submit": submit, "packet": packet})
+        if self.script:
+            return self.script.pop(0)
+        if submit:
+            result = FillResult(FillOutcome.SUBMITTED, {"Email": "email"}, confirmation="Thank you for applying!")
+            result.submit_attempted = True
+            return result
+        return FillResult(FillOutcome.FILLED, {"Email": "email", "First Name": "first_name"})

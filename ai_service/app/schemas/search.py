@@ -51,3 +51,11 @@ class SearchResponse(BaseModel):
     filtered_out: dict[str, int] = Field(default_factory=dict, description="Reason -> number of jobs removed")
     results: list[JobWithMatch]
     errors: list[str] = Field(default_factory=list)
+
+
+class SearchProgress(BaseModel):
+    """One completed stage of a streamed search (POST /search/stream)."""
+
+    stage: str
+    label: str
+    detail: str = ""

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ai_service.app.api.deps import get_llm, get_searxng
 from ai_service.app.core.config import settings
 from ai_service.app.database.session import get_db
+from ai_service.app.integrations.browser.runtime import browser_health
 from ai_service.app.integrations.llm.llm_client import LLMClient
 from ai_service.app.integrations.search.searxng_client import SearXNGClient
 
@@ -23,6 +24,7 @@ async def health(
     except Exception:
         database_ok = False
     searxng_ok = await searxng.healthcheck()
+    browser = await browser_health()
     return {
         "service": "jobpilot-ai",
         "version": settings.app_version,
@@ -31,6 +33,6 @@ async def health(
             "database": {"ok": database_ok, "driver": settings.database_url.split(":", 1)[0]},
             "searxng": {"ok": searxng_ok, "url": settings.searxng_url},
             "llm": {"ok": llm.available, "model": llm.primary_model if llm.available else None},
-            "browser": {"ok": True, "headless": settings.browser_headless},
+            "browser": {"ok": browser["ok"], "detail": browser["detail"], "headless": settings.browser_headless},
         },
     }

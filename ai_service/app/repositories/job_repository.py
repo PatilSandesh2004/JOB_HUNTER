@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,15 +14,19 @@ class JobRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def upsert_many(self, items: list[JobWithMatch]) -> None:
+    async def upsert_many(self, items: list[JobWithMatch], *, checked: bool = False) -> None:
+        """Insert or update jobs. `checked`: verified jobs were just confirmed open with their board."""
         if not items:
             return
         ids = [item.job.id for item in items]
         existing = {
             row.id: row for row in (await self.session.scalars(select(JobModel).where(JobModel.id.in_(ids)))).all()
         }
+        now = datetime.now(UTC)
         for item in items:
             values = _to_columns(item)
+            if checked and item.job.verified:
+                values["last_checked_at"] = now
             row = existing.get(item.job.id)
             if row is None:
                 self.session.add(JobModel(**values))
@@ -32,10 +39,25 @@ class JobRepository:
         row = await self.session.get(JobModel, job_id)
         return to_schema(row).job if row else None
 
-    async def list_all(self, limit: int = 200) -> list[JobWithMatch]:
-        rows = (await self.session.scalars(select(JobModel).order_by(JobModel.updated_at.desc()).limit(limit))).all()
-        items = [to_schema(row) for row in rows]
-        return sorted(items, key=lambda i: i.match.overall_match if i.match else -1, reverse=True)
+    async def list_all(self, limit: int = 200, include_closed: bool = False) -> list[JobWithMatch]:
+        """Best matches first (unscored last), then most recently seen."""
+        stmt = select(JobModel).order_by(
+            JobModel.overall_match.is_(None), JobModel.overall_match.desc(), JobModel.updated_at.desc()
+        )
+        if not include_closed:
+            stmt = stmt.where(JobModel.closed_at.is_(None))
+        return [to_schema(row) for row in (await self.session.scalars(stmt.limit(limit))).all()]
+
+    async def iter_batches(self, size: int = 200) -> AsyncIterator[list[JobWithMatch]]:
+        """Every stored job, in batches, so large stores are never loaded at once."""
+        offset = 0
+        while True:
+            stmt = select(JobModel).order_by(JobModel.id).offset(offset).limit(size)
+            rows = (await self.session.scalars(stmt)).all()
+            if not rows:
+                return
+            yield [to_schema(row) for row in rows]
+            offset += size
 
     async def clear(self) -> tuple[int, int]:
         """Delete stored jobs, keeping those an application refers to. Returns (deleted, kept)."""
@@ -52,12 +74,16 @@ def _to_columns(item: JobWithMatch) -> dict:
     data["workplace_type"] = item.job.workplace_type.value
     data["remote_scope"] = item.job.remote_scope.value
     data["match"] = item.match.model_dump(mode="json") if item.match else None
+    data["overall_match"] = item.match.overall_match if item.match else None
     return data
+
+
+_NOT_IN_SCHEMA = {"match", "overall_match", "last_checked_at"}
 
 
 def to_schema(row: JobModel) -> JobWithMatch:
     job = NormalizedJob.model_validate(
-        {c.name: getattr(row, c.name) for c in JobModel.__table__.columns if c.name != "match"}
+        {c.name: getattr(row, c.name) for c in JobModel.__table__.columns if c.name not in _NOT_IN_SCHEMA}
         | {"scraped_at": row.updated_at}
     )
     return JobWithMatch(job=job, match=MatchResult.model_validate(row.match) if row.match else None)

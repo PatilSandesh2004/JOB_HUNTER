@@ -1,32 +1,50 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ai_service.app.api.deps import get_job_recheck_service
+from ai_service.app.core.config import settings
 from ai_service.app.database.session import get_db
 from ai_service.app.repositories.candidate_repository import CandidateRepository
 from ai_service.app.repositories.job_repository import JobRepository
 from ai_service.app.schemas.match import JobWithMatch
+from ai_service.app.services.jobs.recheck_service import JobRecheckService
 from ai_service.app.services.matching.matching_engine import MatchingEngineService
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.get("", response_model=list[JobWithMatch])
-async def list_jobs(limit: int = Query(200, ge=1, le=1000), db: AsyncSession = Depends(get_db)):
-    return await JobRepository(db).list_all(limit)
+async def list_jobs(
+    limit: int = Query(200, ge=1, le=1000),
+    include_closed: bool = Query(False, description="Also return postings the job board reported closed"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stored jobs, best match first."""
+    return await JobRepository(db).list_all(limit, include_closed)
 
 
 @router.post("/rescore", response_model=list[JobWithMatch])
-async def rescore_jobs(db: AsyncSession = Depends(get_db)):
-    """Re-run matching for stored jobs, e.g. after the profile changed."""
+async def rescore_jobs(limit: int = Query(200, ge=1, le=1000), db: AsyncSession = Depends(get_db)):
+    """Re-run matching for every stored job (e.g. after the profile changed); returns the top `limit`."""
     repo = JobRepository(db)
-    items = await repo.list_all(limit=1000)
     candidate = await CandidateRepository(db).get_active()
-    if candidate is None:
-        return items
-    matcher = MatchingEngineService()
-    rescored = [JobWithMatch(job=i.job, match=matcher.evaluate_match(candidate, i.job)) for i in items]
-    await repo.upsert_many(rescored)
-    return await repo.list_all(limit=1000)
+    if candidate is not None:
+        matcher = MatchingEngineService()
+        async for batch in repo.iter_batches():
+            await repo.upsert_many(
+                [JobWithMatch(job=i.job, match=matcher.evaluate_match(candidate, i.job)) for i in batch]
+            )
+    return await repo.list_all(limit)
+
+
+@router.post("/recheck")
+async def recheck_jobs(
+    limit: int | None = Query(None, ge=1, le=500, description="Jobs to check (default: JOB_RECHECK_BATCH_SIZE)"),
+    force: bool = Query(False, description="Also re-check jobs that were checked recently"),
+    service: JobRecheckService = Depends(get_job_recheck_service),
+) -> dict[str, int]:
+    """Ask the job boards whether stored postings are still open; closed ones are hidden from the list."""
+    return await service.recheck_stale(limit or settings.job_recheck_batch_size, 0 if force else None)
 
 
 @router.delete("", status_code=200)

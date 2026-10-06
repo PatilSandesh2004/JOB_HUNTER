@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ from ai_service.app.api.deps import get_application_service
 from ai_service.app.core.config import settings
 from ai_service.app.database.session import get_db
 from ai_service.app.repositories.application_repository import ApplicationRepository, to_schema
-from ai_service.app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationStatus, ApplyMode
+from ai_service.app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationStatus
 from ai_service.app.services.applications.application_service import ApplicationService
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -31,22 +31,16 @@ async def list_applications(
 @router.post("", response_model=ApplicationRead, status_code=status.HTTP_202_ACCEPTED)
 async def create_application(
     payload: ApplicationCreate,
-    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     service: ApplicationService = Depends(get_application_service),
 ):
-    """Start an application.
+    """Start an application. The agent work is queued and runs in the background.
 
     - `review`: draft a cover letter and pre-fill the form; you approve before it is submitted.
     - `auto`: same, but submit when the form is complete and has no CAPTCHA.
     - `manual`: you apply on the company site; it waits in "Did you apply?" and a letter is drafted for you.
     """
-    application, task = await service.create(db, payload)
-    if task == "agent":
-        background.add_task(service.process, application.id, payload.mode == ApplyMode.AUTO)
-    elif task == "letter":
-        background.add_task(service.draft_cover_letter, application.id)
-    return application
+    return await service.create(db, payload)
 
 
 @router.get("/{application_id}", response_model=ApplicationRead)
@@ -71,14 +65,11 @@ async def update_application(
 @router.post("/{application_id}/approve", response_model=ApplicationRead, status_code=status.HTTP_202_ACCEPTED)
 async def approve_application(
     application_id: str,
-    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     service: ApplicationService = Depends(get_application_service),
 ):
-    """Human approval: re-open the form, fill it and submit."""
-    application = await service.approve(db, application_id)
-    background.add_task(service.process, application.id, True)
-    return application
+    """Human approval: re-open the form, fill it and submit (queued)."""
+    return await service.approve(db, application_id)
 
 
 @router.get("/{application_id}/screenshot", response_class=FileResponse)

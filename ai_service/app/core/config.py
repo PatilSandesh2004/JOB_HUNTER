@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     browser_timeout_ms: int = 30_000
     browser_max_concurrency: int = 2
 
+    # Background agent tasks (database-backed queue, see services/tasks/runner.py)
+    task_concurrency: int = 3
+    task_poll_seconds: float = 2.0
+    task_max_attempts: int = 3  # form fills; a fill is never retried once Submit was clicked
+    task_retry_backoff_seconds: list[float] = Field(default_factory=lambda: [30.0, 120.0, 600.0])
+
+    # Stored jobs are re-verified with their job board this often; closed postings are hidden (0 = off)
+    job_recheck_interval_hours: float = 12.0
+    job_recheck_batch_size: int = 40
+
     # Matching & notifications
     high_match_threshold: float = 85.0
     notification_webhook_url: str = ""

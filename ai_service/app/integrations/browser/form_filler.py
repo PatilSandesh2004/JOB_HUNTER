@@ -10,19 +10,16 @@ import asyncio
 import contextlib
 import logging
 import re
-import sys
-import threading
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from ai_service.app.core.config import settings
+from ai_service.app.integrations.browser.runtime import in_browser_thread
 from ai_service.app.services.jobs.ats import apply_page_url
 
 logger = logging.getLogger("jobpilot.browser")
-
-_browser_slots = threading.BoundedSemaphore(settings.browser_max_concurrency)
 
 
 class FillOutcome(StrEnum):
@@ -71,6 +68,8 @@ class FillResult:
     confirmation: str | None = None
     message: str | None = None
     final_url: str | None = None
+    # True once the submit button was clicked: from then on a retry could create a duplicate application.
+    submit_attempted: bool = False
 
 
 # (semantic key, descriptor regex, allowed element kinds or None for text-like inputs)
@@ -217,16 +216,7 @@ def classify_field(descriptor: str, kind: str) -> str | None:
 
 async def fill_application(url: str, packet: ApplicantPacket, *, submit: bool, screenshot_path: Path) -> FillResult:
     """Run the filler in a dedicated thread/event loop (Playwright needs subprocess support on Windows)."""
-    return await asyncio.to_thread(_run_isolated, url, packet, submit, screenshot_path)
-
-
-def _run_isolated(url: str, packet: ApplicantPacket, submit: bool, screenshot_path: Path) -> FillResult:
-    loop = asyncio.ProactorEventLoop() if sys.platform == "win32" else asyncio.new_event_loop()
-    with _browser_slots:
-        try:
-            return loop.run_until_complete(_FormFillSession(packet, screenshot_path).run(url, submit))
-        finally:
-            loop.close()
+    return await in_browser_thread(lambda: _FormFillSession(packet, screenshot_path).run(url, submit))
 
 
 class _FormFillSession:
@@ -386,6 +376,7 @@ class _FormFillSession:
             result.outcome, result.message = FillOutcome.NEEDS_MANUAL, "Could not find the submit button"
             return result
 
+        result.submit_attempted = True
         await button.click()
         await self._settle(page)
         await page.wait_for_timeout(1500)
