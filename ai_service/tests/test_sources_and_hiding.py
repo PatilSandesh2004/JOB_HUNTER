@@ -6,7 +6,7 @@ from ai_service.app.agents.search_agent.graph import SearchAgent
 from ai_service.app.api import deps
 from ai_service.app.database.session import AsyncSessionLocal
 from ai_service.app.main import app
-from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
+from ai_service.app.services.notifications.alerts import MatchAlertService
 from ai_service.app.services.search.board_source import BoardSearchSource
 from ai_service.app.services.search.discovery_service import DiscoveryService
 from ai_service.tests.fakes import RESUME, FakeSearchService, offline_llm
@@ -75,7 +75,7 @@ async def test_board_watchlist_api(client, tmp_path):
 
 async def test_scheduled_discovery_uses_the_profile(client):
     discovery = DiscoveryService(
-        AsyncSessionLocal, lambda: SearchAgent(FakeSearchService(), offline_llm()), WebhookNotificationService("", 85)
+        AsyncSessionLocal, lambda: SearchAgent(FakeSearchService(), offline_llm()), MatchAlertService(85)
     )
     assert await discovery.run_once() == 0  # no profile, nothing to search for
 

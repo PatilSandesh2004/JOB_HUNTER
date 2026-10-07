@@ -20,49 +20,112 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ai_service.app.core.http import tls_verify
+from ai_service.app.core.text import parse_datetime, strip_html
 from ai_service.app.schemas.search import RawJobPosting
 from ai_service.app.services.jobs.ats import detect_ats, slug_to_company
 from ai_service.app.services.jobs.location_service import LocationFit, LocationMatcher
-from ai_service.app.services.matching.matching_engine import role_similarity
-from ai_service.app.services.search.search_service import strip_html
+from ai_service.app.services.matching.roles import role_similarity
+from ai_service.app.services.skills.catalog import extract_skills
 
 logger = logging.getLogger("jobpilot.boards")
 
-# Verified 2026-10: boards with open roles in India (most in Bengaluru).
+# Verified 2026-10 against each board's public API: companies with open roles in India or open to remote
+# candidates (at least 5, or a large share of the board). 80 boards; a full refresh is ~60 MB, so it is cached.
 SEED_BOARDS: dict[str, tuple[str, ...]] = {
     "greenhouse": (
+        "affirm",
         "airbnb",
         "anthropic",
+        "bitgo",
+        "calendly",
+        "canonical",
         "coinbase",
         "databricks",
         "datadog",
+        "dropbox",
         "druva",
         "elastic",
-        "figma",
         "fivetran",
         "gitlab",
+        "glance",
+        "grafanalabs",
         "groww",
+        "gusto",
         "hackerrank",
+        "highradius",
+        "inmobi",
+        "mercury",
         "mongodb",
+        "monzo",
+        "mozilla",
         "newrelic",
         "observeai",
         "okta",
+        "okx",
+        "pagerduty",
         "rubrik",
         "samsara",
         "sigmoid",
+        "slice",
+        "snorkelai",
         "stripe",
         "toast",
         "turing",
         "twilio",
+        "vercel",
+        "wikimedia",
         "zscaler",
     ),
-    "lever": ("cred", "fampay", "hevodata", "meesho", "mindtickle", "nium", "paytm", "pocketfm", "zeta"),
-    "ashby": ("atlys", "composio", "elevenlabs", "harvey", "notion", "openai", "plane", "sarvam", "smallest", "writer"),
+    "lever": (
+        "binance",
+        "cred",
+        "fampay",
+        "hevodata",
+        "meesho",
+        "mindtickle",
+        "nium",
+        "paytm",
+        "pocketfm",
+        "toptal",
+        "zeta",
+    ),
+    "ashby": (
+        "andela",
+        "anyscale",
+        "atlan",
+        "atlys",
+        "bounce",
+        "bureau",
+        "cohere",
+        "composio",
+        "confluent",
+        "cursor",
+        "elevenlabs",
+        "harvey",
+        "langchain",
+        "linear",
+        "llamaindex",
+        "notion",
+        "openai",
+        "perplexity",
+        "plaid",
+        "plane",
+        "ramp",
+        "replit",
+        "sarvam",
+        "smallest",
+        "spotdraft",
+        "writer",
+        "zapier",
+    ),
 }
 BOARD_ATS = ("greenhouse", "lever", "ashby", "workable", "smartrecruiters", "recruitee", "personio")
-RELEVANCE_THRESHOLD = 50.0
+RELEVANCE_THRESHOLD = 55.0  # same bar as the search agent (services/matching/roles.py)
+MAYBE_THRESHOLD = 40.0
 MAX_PER_BOARD = 15
-CACHE_TTL_SECONDS = 20 * 60
+MAX_MAYBE_PER_BOARD = 5
+CACHE_TTL_SECONDS = 3 * 3600  # boards change slowly; closed postings are re-checked separately
 MAX_XML_BYTES = 5_000_000
 
 
@@ -181,7 +244,7 @@ class BoardSearchSource:
             headers={"Accept": "application/json, text/xml"},
             transport=self.transport,
             follow_redirects=True,
-            verify=False,
+            verify=tls_verify(),
         )
 
     async def search(self, titles: list[str], locations: list[str]) -> list[RawJobPosting]:
@@ -191,19 +254,23 @@ class BoardSearchSource:
 
         postings: list[RawJobPosting] = []
         for jobs in boards:
-            scored = []
+            sure, maybe = [], []
             for job in jobs:
-                relevance = max((role_similarity(t, job.title) for t in titles), default=0.0)
-                if relevance < RELEVANCE_THRESHOLD:
-                    continue
                 if matcher.active and matcher.fit_values(job.location, job.title, job.workplace == "REMOTE") not in (
                     LocationFit.MATCH,
                     LocationFit.REMOTE_OK,
                 ):
                     continue
-                scored.append((relevance, job))
-            scored.sort(key=lambda pair: pair[0], reverse=True)
-            postings += [job for _, job in scored[:MAX_PER_BOARD]]
+                relevance = _relevance(job, titles)
+                if relevance >= RELEVANCE_THRESHOLD:
+                    sure.append((relevance, job))
+                elif relevance >= MAYBE_THRESHOLD and not job.snippet:
+                    # A generic title ("Software Engineer") with no description yet: the search agent decides
+                    # once the description has been fetched.
+                    maybe.append((relevance, job))
+            sure.sort(key=lambda pair: pair[0], reverse=True)
+            maybe.sort(key=lambda pair: pair[0], reverse=True)
+            postings += [job for _, job in sure[:MAX_PER_BOARD]] + [job for _, job in maybe[:MAX_MAYBE_PER_BOARD]]
         return postings
 
     async def _board(self, ats: str, slug: str, client: httpx.AsyncClient) -> list[RawJobPosting]:
@@ -226,7 +293,7 @@ class BoardSearchSource:
         url = {
             "greenhouse": f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs",
             "lever": f"https://api.lever.co/v0/postings/{slug}?mode=json",
-            "ashby": f"https://api.ashbyhq.com/posting-api/job-board/{slug}",
+            "ashby": f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true",
             "workable": f"https://apply.workable.com/api/v1/widget/accounts/{slug}?details=true",
             "smartrecruiters": f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100",
             "recruitee": f"https://{slug}.recruitee.com/api/offers/",
@@ -267,6 +334,44 @@ def _parse_board(value: str) -> tuple[str, str]:
     return ats, slug.lower()
 
 
+def _relevance(job: RawJobPosting, titles: list[str]) -> float:
+    """Title fit to the searched titles; a borderline title is re-judged with the skills in its description."""
+    relevance = max((role_similarity(t, job.title) for t in titles), default=0.0)
+    if MAYBE_THRESHOLD <= relevance < RELEVANCE_THRESHOLD and job.snippet:
+        skills = extract_skills(job.snippet)
+        relevance = max((role_similarity(t, job.title, skills) for t in titles), default=0.0)
+    return relevance
+
+
+_LEVER_INTERVALS = {"per-year-salary": "year", "per-month-salary": "month", "per-hour-wage": "hour"}
+_ASHBY_INTERVALS = {"1 YEAR": "year", "1 MONTH": "month", "1 HOUR": "hour"}
+
+
+def lever_salary(job: dict[str, Any]) -> dict[str, Any]:
+    pay = job.get("salaryRange") or {}
+    if not (pay.get("min") or pay.get("max")):
+        return {}
+    return {
+        "salary_min": pay.get("min"),
+        "salary_max": pay.get("max"),
+        "salary_currency": pay.get("currency"),
+        "salary_period": _LEVER_INTERVALS.get(str(pay.get("interval")), "year"),
+    }
+
+
+def ashby_salary(job: dict[str, Any]) -> dict[str, Any]:
+    components = ((job.get("compensation") or {}).get("summaryComponents")) or []
+    salary = next((c for c in components if str(c.get("compensationType")).lower() == "salary"), None)
+    if not salary or not (salary.get("minValue") or salary.get("maxValue")):
+        return {}
+    return {
+        "salary_min": salary.get("minValue"),
+        "salary_max": salary.get("maxValue"),
+        "salary_currency": salary.get("currencyCode"),
+        "salary_period": _ASHBY_INTERVALS.get(str(salary.get("interval")).upper(), "year"),
+    }
+
+
 def _greenhouse(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
     # Listing has no description; the enrichment step fetches it for the jobs that survive filtering.
     url = job.get("absolute_url")
@@ -280,6 +385,10 @@ def _greenhouse(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
         location=location,
         workplace="REMOTE" if location and "remote" in location.lower() else None,
         source="company_board",
+        posted_at=parse_datetime(job.get("first_published") or job.get("updated_at")),
+        # absolute_url is often the company's own careers site; keep the board and id to fetch the description.
+        board=f"greenhouse:{slug}",
+        board_job_id=str(job["id"]) if job.get("id") else None,
     )
 
 
@@ -300,6 +409,8 @@ def _lever(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
         workplace=workplace,
         source="company_board",
         verified=True,
+        posted_at=parse_datetime(job.get("createdAt")),
+        **lever_salary(job),
     )
 
 
@@ -320,6 +431,8 @@ def _ashby(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
         workplace=workplace or ("REMOTE" if job.get("isRemote") else None),
         source="company_board",
         verified=True,
+        posted_at=parse_datetime(job.get("publishedAt")),
+        **ashby_salary(job),
     )
 
 
@@ -337,6 +450,7 @@ def _workable(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
         workplace="REMOTE" if job.get("telecommuting") else None,
         source="company_board",
         verified=True,
+        posted_at=parse_datetime(job.get("published_on") or job.get("created_at")),
     )
 
 
@@ -353,6 +467,7 @@ def _smartrecruiters(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
         workplace=workplace,
         source="company_board",
         verified=True,
+        posted_at=parse_datetime(job.get("releasedDate")),
     )
 
 
@@ -370,6 +485,7 @@ def _recruitee(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
         workplace=workplace,
         source="company_board",
         verified=True,
+        posted_at=parse_datetime(job.get("published_at") or job.get("created_at")),
     )
 
 
@@ -384,6 +500,7 @@ def _personio(slug: str, job: dict[str, Any]) -> RawJobPosting | None:
         location="; ".join(job.get("offices") or []) or None,
         source="company_board",
         verified=True,
+        posted_at=parse_datetime(job.get("created_at")),
     )
 
 
@@ -405,6 +522,7 @@ def _personio_positions(content: bytes) -> list[dict[str, Any]]:
                 "subcompany": position.findtext("subcompany"),
                 "offices": [o.strip() for o in dict.fromkeys(offices) if o.strip()],
                 "description": descriptions,
+                "created_at": position.findtext("createdAt"),
             }
         )
     return positions

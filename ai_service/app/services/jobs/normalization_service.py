@@ -8,7 +8,7 @@ from rapidfuzz import fuzz
 from ai_service.app.schemas.job import NormalizedJob, RemoteScope, WorkplaceType
 from ai_service.app.schemas.search import RawJobPosting
 from ai_service.app.services.jobs.ats import detect_ats, slug_to_company
-from ai_service.app.services.skills.catalog import extract_skills
+from ai_service.app.services.jobs.requirements import Salary, experience_range, parse_salary, split_skills
 from ai_service.app.services.visa.visa_service import VisaIntelligenceService
 
 JOB_ID_NAMESPACE = uuid.UUID("6f1c1d1e-8a43-4c36-9d55-2b9a7d0f1a10")
@@ -55,7 +55,6 @@ _REMOTE_SCOPES: list[tuple[RemoteScope, re.Pattern[str]]] = [
     (RemoteScope.ASIA, re.compile(r"\b(apac|asia|singapore|japan)\b", re.I)),
     (RemoteScope.TIMEZONE_RESTRICTED, re.compile(r"\b(utc|gmt|cet|est|pst|ist)\b|\btime ?zones?\b", re.I)),
 ]
-_EXPERIENCE_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:-|to|–)?\s*(?:\d{1,2}\s*)?\+?\s*years?", re.I)
 _EMPLOYMENT_RE = re.compile(r"\b(full[- ]time|part[- ]time|contract(?:or)?|internship|freelance|temporary)\b", re.I)
 
 
@@ -73,6 +72,9 @@ class JobNormalizationService:
             or _title_location(raw.title, ats.name)
             or self._location_from_hints(text, location_hints or [])
         )
+        required, preferred = split_skills(text)
+        min_years, max_years = experience_range(text)
+        salary = _salary(raw, text)
 
         return NormalizedJob(
             id=str(uuid.uuid5(JOB_ID_NAMESPACE, raw.url.split("?")[0].rstrip("/"))),
@@ -86,8 +88,14 @@ class JobNormalizationService:
                 location if raw.verified and location else f"{location or ''} {text}", workplace
             ),
             employment_type=_first_group(_EMPLOYMENT_RE, text),
-            experience_required=self._experience(text),
-            required_skills=extract_skills(text),
+            salary_min=salary.minimum if salary else None,
+            salary_max=salary.maximum if salary else None,
+            salary_currency=salary.currency if salary else None,
+            salary_period=salary.period if salary else None,
+            experience_required=min_years,
+            experience_max=max_years,
+            required_skills=required,
+            preferred_skills=preferred,
             visa_sponsorship=self.visa.evaluate_sponsorship(text, raw.url),
             application_url=raw.url,
             ats=ats.name,
@@ -146,10 +154,38 @@ class JobNormalizationService:
                 return hint
         return None
 
-    @staticmethod
-    def _experience(text: str) -> float | None:
-        values = [int(m.group(1)) for m in _EXPERIENCE_RE.finditer(text) if 0 < int(m.group(1)) <= 25]
-        return float(min(values)) if values else None
+
+def refresh_requirements(job: NormalizedJob) -> NormalizedJob:
+    """Re-read skills, experience and (missing) salary from a stored description, e.g. after the parsers
+    improved, so jobs saved by an older version are scored like new ones."""
+    if not job.description:
+        return job
+    text = f"{job.title}\n{job.description}"
+    required, preferred = split_skills(text)
+    min_years, max_years = experience_range(text)
+    update: dict = {
+        "required_skills": required,
+        "preferred_skills": preferred,
+        "experience_required": min_years,
+        "experience_max": max_years,
+    }
+    if job.salary_min is None and job.salary_max is None and (salary := parse_salary(text)):
+        update |= {
+            "salary_min": salary.minimum,
+            "salary_max": salary.maximum,
+            "salary_currency": salary.currency,
+            "salary_period": salary.period,
+        }
+    return job.model_copy(update=update)
+
+
+def _salary(raw: RawJobPosting, text: str) -> Salary | None:
+    """Pay stated by the source's API, else the first salary range written in the posting."""
+    if raw.salary_min is not None or raw.salary_max is not None:
+        low = raw.salary_min if raw.salary_min is not None else raw.salary_max
+        high = raw.salary_max if raw.salary_max is not None else raw.salary_min
+        return Salary(low, high, (raw.salary_currency or "USD").upper(), raw.salary_period or "year")
+    return parse_salary(text)
 
 
 def _linkedin_title_and_company(raw: RawJobPosting) -> tuple[str, str]:

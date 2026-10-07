@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ai_service.app.database.session import Base
@@ -22,8 +22,11 @@ class JobModel(TimestampMixin, Base):
     salary_min: Mapped[float | None] = mapped_column(Float)
     salary_max: Mapped[float | None] = mapped_column(Float)
     salary_currency: Mapped[str | None] = mapped_column(String(8))
+    salary_period: Mapped[str | None] = mapped_column(String(8))
     experience_required: Mapped[float | None] = mapped_column(Float)
+    experience_max: Mapped[float | None] = mapped_column(Float)
     required_skills: Mapped[list[str]] = mapped_column(JSON, default=list)
+    preferred_skills: Mapped[list[str]] = mapped_column(JSON, default=list, server_default=text("'[]'"))
     visa_sponsorship: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     relocation: Mapped[bool] = mapped_column(Boolean, default=False)
     application_url: Mapped[str] = mapped_column(String(1000), unique=True, index=True)
@@ -40,3 +43,5 @@ class JobModel(TimestampMixin, Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # You marked it "not interested": hidden from the list and from later search results.
     hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # A strong-match alert (webhook/email) was sent for it, so it is never announced twice.
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

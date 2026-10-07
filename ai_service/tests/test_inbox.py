@@ -157,7 +157,7 @@ class FakeReader:
 
 
 async def test_inbox_check_adds_alert_jobs_and_updates_statuses(client):
-    from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
+    from ai_service.app.services.notifications.alerts import MatchAlertService
 
     await client.post("/api/v1/candidates/me/resume", files={"file": ("cv.txt", RESUME, "text/plain")})
     results = (
@@ -176,7 +176,7 @@ async def test_inbox_check_adds_alert_jobs_and_updates_statuses(client):
         _mail("Weekly digest <news@example.com>", "Top stories", text="Acme raised money. Unfortunately..."),
     ]
     reader = FakeReader(messages)
-    service = InboxService(AsyncSessionLocal, reader, notifier=WebhookNotificationService("", 85))
+    service = InboxService(AsyncSessionLocal, reader, notifier=MatchAlertService(85))
     report = await service.check()
 
     assert reader.downloaded == [["AI Engineer: 2 new jobs", "Your application to Acme"]]  # digest never downloaded

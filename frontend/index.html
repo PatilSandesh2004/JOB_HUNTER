@@ -130,8 +130,19 @@
                         <button type="submit" id="btn-search" class="btn-primary">
                             <i class="fa-solid fa-magnifying-glass"></i> Search Jobs
                         </button>
+                        <button type="button" id="btn-save-search" class="btn-secondary"
+                            title="Run this search on a schedule and get alerts for strong new matches">
+                            <i class="fa-regular fa-bookmark"></i> Save search
+                        </button>
                     </div>
                 </form>
+                <p class="search-hint">Leave the role empty to search from your resume: JobPilot uses your target roles,
+                    the other names those jobs are posted under, and your strongest skills.</p>
+
+                <details class="saved-searches" id="saved-searches-panel">
+                    <summary><i class="fa-solid fa-clock-rotate-left"></i> Saved searches <span class="muted" id="saved-search-count"></span></summary>
+                    <div id="saved-searches-list"></div>
+                </details>
 
                 <div class="resume-bar">
                     <label class="resume-choice" for="resume-choice">
@@ -173,10 +184,27 @@
                 <div class="filter-controls" id="job-filters">
                     <button class="filter-btn active" data-filter="all">All</button>
                     <button class="filter-btn" data-filter="strong">70%+ Match</button>
+                    <button class="filter-btn" data-filter="new">New</button>
                     <button class="filter-btn" data-filter="location">My Locations</button>
                     <button class="filter-btn" data-filter="remote">Remote</button>
+                    <button class="filter-btn" data-filter="salary">Has salary</button>
                     <button class="filter-btn" data-filter="visa">Visa Sponsored</button>
                 </div>
+            </div>
+            <div class="job-toolbar">
+                <div class="view-toggle" id="job-view" role="group" aria-label="Which jobs">
+                    <button class="view-btn" data-view="search" id="view-search" disabled>This search</button>
+                    <button class="view-btn active" data-view="all" id="view-all">All saved jobs</button>
+                </div>
+                <label class="input-field compact"><i class="fa-solid fa-filter"></i>
+                    <input type="search" id="job-query" placeholder="Filter by title, company, skill…" aria-label="Filter jobs"></label>
+                <label class="input-field compact"><i class="fa-solid fa-arrow-down-wide-short"></i>
+                    <select id="job-sort" aria-label="Sort jobs">
+                        <option value="match">Best match</option>
+                        <option value="newest">Newest</option>
+                        <option value="salary">Highest salary</option>
+                        <option value="company">Company A–Z</option>
+                    </select></label>
             </div>
             <div id="jobs-container" class="jobs-grid"></div>
         </section>
@@ -229,12 +257,34 @@
                 </div>
             </div>
 
+            <div class="card-panel" style="margin-bottom: 2rem;">
+                <div class="panel-header panel-header-row">
+                    <div>
+                        <h2><i class="fa-solid fa-calendar-week"></i> This Week</h2>
+                        <p>What you sent, what came back, and which kinds of roles reply.</p>
+                    </div>
+                    <button type="button" class="btn-secondary btn-sm" id="btn-email-report"
+                        title="Needs SMTP settings in .env"><i class="fa-solid fa-envelope"></i> Email me this report</button>
+                </div>
+                <div id="report-view"></div>
+            </div>
+
+            <p class="notice warn" id="follow-up-banner" hidden></p>
+
             <div class="card-panel">
-                <div class="panel-header">
-                    <h2><i class="fa-solid fa-list-check"></i> Application Management</h2>
-                    <p>Track job progress, review agent drafts, save required answers, and launch interview prep.</p>
+                <div class="panel-header panel-header-row">
+                    <div>
+                        <h2><i class="fa-solid fa-list-check"></i> Application Management</h2>
+                        <p>Move jobs from Saved to Offer, review agent drafts, answer open questions, prepare for
+                            interviews.</p>
+                    </div>
+                    <div class="view-toggle" id="app-view" role="group" aria-label="Applications view">
+                        <button class="view-btn active" data-view="list">Details</button>
+                        <button class="view-btn" data-view="board">Board</button>
+                    </div>
                 </div>
                 <div id="applications-list" class="approval-list"></div>
+                <div id="applications-board" hidden></div>
             </div>
         </section>
 
@@ -262,10 +312,22 @@
                 <div id="prep-insights-view">
                     <div class="empty-state">
                         <i class="fa-solid fa-lightbulb"></i>
-                        <p>Select an application above or click "Prep Insights" on any applied job card to view
-                            customized interview preparation guidelines.</p>
+                        <p>Choose an application above, or click "Prepare for Interview" on an applied job in
+                            Applications.</p>
                     </div>
                 </div>
+            </div>
+
+            <div class="card-panel" style="margin-top: 2rem;">
+                <div class="panel-header panel-header-row">
+                    <div>
+                        <h2><i class="fa-solid fa-user-tie"></i> Mock Interview</h2>
+                        <p>Five questions for the application chosen above, with feedback on each answer.</p>
+                    </div>
+                    <button type="button" class="btn-primary" id="btn-start-interview"><i class="fa-solid fa-play"></i>
+                        Start</button>
+                </div>
+                <div id="interview-view"></div>
             </div>
         </section>
 
@@ -278,8 +340,16 @@
                         LinkedIn profile.</p>
                 </div>
 
-                <form id="network-search-form" style="display: flex; gap: 1rem; margin-bottom: 2rem;">
-                    <div class="input-field" style="flex: 1;">
+                <div class="connections-import">
+                    <label class="btn-secondary btn-sm" for="connections-input"><i class="fa-brands fa-linkedin"></i>
+                        Import LinkedIn connections (CSV)</label>
+                    <input type="file" id="connections-input" accept=".csv" hidden>
+                    <span class="muted small" id="connections-status"></span>
+                    <span class="muted small">LinkedIn → Settings → Data privacy → Get a copy of your data → Connections.</span>
+                </div>
+
+                <form id="network-search-form" class="network-search">
+                    <div class="input-field">
                         <i class="fa-solid fa-building"></i>
                         <input type="text" id="network-company-input"
                             placeholder="Enter company name (e.g. Google, Stripe, Microsoft)" required>
@@ -318,6 +388,20 @@
                     yet.</p>
             </div>
 
+            <div class="card-panel" style="margin-bottom: 2rem;">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-copy"></i> Resume Versions</h2>
+                    <p>Keep versions for different kinds of roles (e.g. "AI" and "Backend"). When applying, the version
+                        that covers most of the job's skills is attached. Your profile is not changed.</p>
+                </div>
+                <form id="resume-version-form" class="answer-add">
+                    <input id="resume-version-label" placeholder="Label, e.g. AI or Backend" maxlength="80" required>
+                    <input type="file" id="resume-version-file" accept=".pdf,.docx,.txt" required>
+                    <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add version</button>
+                </form>
+                <div id="resume-list" class="board-list"></div>
+            </div>
+
             <div class="candidate-grid">
                 <!-- Profile details form -->
                 <div class="card-panel">
@@ -346,7 +430,7 @@
                         </div>
                         <div class="form-row">
                             <div class="form-group"><label for="p-years">Years of Experience</label><input id="p-years"
-                                    type="number" step="0.5" min="0" max="60"></div>
+                                    type="number" step="any" min="0" max="60"></div>
                             <div class="form-group"><label for="p-linkedin"><i class="fa-brands fa-linkedin"></i>
                                     LinkedIn Profile URL</label><input id="p-linkedin" type="url"
                                     placeholder="https://www.linkedin.com/in/username"></div>
@@ -444,12 +528,17 @@
                 </div>
 
                 <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-network-wired"></i> Service Status</h4>
-                <div class="health-grid" id="health-grid" style="margin-bottom: 2rem;"></div>
+                <div class="health-grid" id="health-grid" style="margin-bottom: 1rem;"></div>
+                <p style="margin-bottom: 2rem;">
+                    <button type="button" class="btn-secondary btn-sm" id="btn-recheck"
+                        title="Ask the job boards which stored postings are still open"><i class="fa-solid fa-rotate"></i>
+                        Re-check stored jobs</button>
+                </p>
 
                 <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-building"></i> Company Watchlist (ATS Direct
                     Search)</h4>
                 <form id="board-form" class="answer-add board-add" style="margin-bottom: 1.5rem;">
-                    <input id="board-url" placeholder="Paste Lever, Greenhouse, Ashby or Workable URL" required
+                    <input id="board-url" placeholder="Paste a job or careers link (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee, Personio)" required
                         maxlength="500">
                     <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Watch Company</button>
                 </form>

@@ -1,5 +1,5 @@
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from ai_service.app.schemas.candidate import CandidateProfile
 from ai_service.app.schemas.match import JobWithMatch
@@ -18,3 +18,4 @@ class SearchAgentState(TypedDict, total=False):
     results: list[JobWithMatch]
     filtered_out: dict[str, int]
     errors: Annotated[list[str], operator.add]
+    feedback: Any  # FeedbackModel: what you hid and applied to

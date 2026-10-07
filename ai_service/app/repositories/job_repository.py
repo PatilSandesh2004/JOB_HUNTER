@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_service.app.models.application import ApplicationModel
@@ -69,6 +69,24 @@ class JobRepository:
         await self.session.commit()
         return True
 
+    async def unannounced_ids(self, ids: list[str]) -> set[str]:
+        """Of `ids`, the stored jobs no alert was sent for yet (hidden and closed jobs excluded)."""
+        if not ids:
+            return set()
+        stmt = select(JobModel.id).where(
+            JobModel.id.in_(ids),
+            JobModel.notified_at.is_(None),
+            JobModel.hidden_at.is_(None),
+            JobModel.closed_at.is_(None),
+        )
+        return set((await self.session.scalars(stmt)).all())
+
+    async def mark_announced(self, ids: set[str]) -> None:
+        if not ids:
+            return
+        await self.session.execute(update(JobModel).where(JobModel.id.in_(ids)).values(notified_at=datetime.now(UTC)))
+        await self.session.commit()
+
     async def hidden_ids(self, ids: list[str]) -> set[str]:
         if not ids:
             return set()
@@ -96,7 +114,7 @@ class JobRepository:
 
 
 def _to_columns(item: JobWithMatch) -> dict:
-    data = item.job.model_dump(mode="python", exclude={"scraped_at", "auto_apply_supported"})
+    data = item.job.model_dump(mode="python", exclude={"scraped_at", "first_seen_at", "auto_apply_supported"})
     data["visa_sponsorship"] = item.job.visa_sponsorship.model_dump(mode="json")
     data["workplace_type"] = item.job.workplace_type.value
     data["remote_scope"] = item.job.remote_scope.value
@@ -105,12 +123,12 @@ def _to_columns(item: JobWithMatch) -> dict:
     return data
 
 
-_NOT_IN_SCHEMA = {"match", "overall_match", "last_checked_at", "hidden_at"}
+_NOT_IN_SCHEMA = {"match", "overall_match", "last_checked_at", "hidden_at", "notified_at"}
 
 
 def to_schema(row: JobModel) -> JobWithMatch:
     job = NormalizedJob.model_validate(
         {c.name: getattr(row, c.name) for c in JobModel.__table__.columns if c.name not in _NOT_IN_SCHEMA}
-        | {"scraped_at": row.updated_at}
+        | {"scraped_at": row.updated_at, "first_seen_at": row.created_at}
     )
     return JobWithMatch(job=job, match=MatchResult.model_validate(row.match) if row.match else None)

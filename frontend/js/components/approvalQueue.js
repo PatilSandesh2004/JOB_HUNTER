@@ -4,11 +4,13 @@ import { esc, safeUrl, timeAgo } from '../utils.js';
 import { manualButton, statusLabel } from './jobFeed.js';
 
 const GROUPS = [
-    { title: 'Shortlisted / Interviewing', icon: 'fa-trophy', test: (a) => a.status === 'INTERVIEW' },
-    { title: 'Applied Roles', icon: 'fa-circle-check', test: (a) => SUBMITTED.has(a.status) && a.status !== 'INTERVIEW' },
+    { title: 'Offers', icon: 'fa-trophy', test: (a) => a.status === 'OFFER' },
+    { title: 'Shortlisted / Interviewing', icon: 'fa-comments', test: (a) => a.status === 'INTERVIEW' },
+    { title: 'Applied Roles', icon: 'fa-circle-check', test: (a) => a.status === 'APPLIED' },
     { title: 'Needs Your Review', icon: 'fa-hand', test: (a) => NEEDS_REVIEW.has(a.status) },
     { title: 'Agent Working', icon: 'fa-robot', test: (a) => IN_FLIGHT.has(a.status) },
     { title: 'Visited / Not Applied', icon: 'fa-eye', test: (a) => a.status === AWAITING },
+    { title: 'Saved to Apply Later', icon: 'fa-bookmark', test: (a) => a.status === 'SAVED' },
     { title: 'Dismissed / Closed', icon: 'fa-box-archive', test: (a) => a.status === 'DISMISSED' || a.status === 'REJECTED' },
 ];
 
@@ -159,11 +161,15 @@ function actions(app, reviewable) {
         }
         buttons.push(`<button class="btn-ghost btn-sm" data-action="set-status" data-status="DISMISSED" data-app-id="${esc(app.id)}">Dismiss</button>`);
     }
+    if (app.status === 'APPLIED' && app.follow_up_due) {
+        buttons.push(`<button class="btn-primary btn-sm" data-action="follow-up" data-app-id="${esc(app.id)}" title="No reply for a while: mark that you followed up"><i class="fa-solid fa-bell"></i> Followed up</button>`);
+    }
     if (app.status === 'APPLIED') {
         buttons.push(`<button class="btn-primary btn-sm" data-action="get-insights" data-app-id="${esc(app.id)}" data-company="${esc(app.company)}"><i class="fa-solid fa-brain"></i> Prepare for Interview</button>`);
         buttons.push(`<button class="btn-secondary btn-sm" data-action="set-status" data-status="INTERVIEW" data-app-id="${esc(app.id)}"><i class="fa-solid fa-trophy"></i> Shortlisted</button>`);
         buttons.push(`<button class="btn-ghost btn-sm" data-action="set-status" data-status="REJECTED" data-app-id="${esc(app.id)}">Rejected</button>`);
     } else if (app.status === 'INTERVIEW') {
+        buttons.push(`<button class="btn-secondary btn-sm" data-action="set-status" data-status="OFFER" data-app-id="${esc(app.id)}"><i class="fa-solid fa-trophy"></i> Got an offer</button>`);
         buttons.push(`<span class="tag visa" style="background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan); font-weight:700; border: 1px solid var(--accent-cyan);"><i class="fa-solid fa-trophy"></i> Shortlisted</span>`);
         buttons.push(`<button class="btn-primary btn-sm" data-action="get-insights" data-app-id="${esc(app.id)}" data-company="${esc(app.company)}"><i class="fa-solid fa-brain"></i> Prepare for Interview</button>`);
     }

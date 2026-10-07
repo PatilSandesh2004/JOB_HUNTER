@@ -3,11 +3,20 @@ const listeners = new Set();
 
 export const store = {
     state: {
-        jobs: [],          // [{ job, match }]
+        jobs: [],          // [{ job, match }]: what the list shows (this search, or all saved jobs)
+        allJobs: [],       // every stored job
+        searchJobs: null,  // the latest search's results (null before the first search)
+        jobView: 'all',    // 'search' | 'all'
+        jobFilter: 'all',
+        jobSort: 'match',
+        jobQuery: '',
+        visibleCount: 30,
+        lastVisit: null,   // ms timestamp of the previous visit, for "new" badges
         applications: [],  // ApplicationRead[]
+        appView: 'list',   // 'list' (details, the default) | 'board'
         profile: null,     // CandidateProfile | null
         answers: [],       // ScreeningAnswerRead[] (the answer bank)
-        jobFilter: 'all',
+        savedSearches: [],
     },
 
     set(patch) {
@@ -24,4 +33,4 @@ export const store = {
 export const IN_FLIGHT = new Set(['PROCESSING', 'SUBMITTING']);
 export const NEEDS_REVIEW = new Set(['PENDING_APPROVAL', 'NEEDS_MANUAL', 'FAILED']);
 export const AWAITING = 'AWAITING_CONFIRMATION';
-export const SUBMITTED = new Set(['APPLIED', 'INTERVIEW', 'REJECTED']);
+export const SUBMITTED = new Set(['APPLIED', 'INTERVIEW', 'OFFER', 'REJECTED']);

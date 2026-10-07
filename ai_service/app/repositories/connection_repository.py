@@ -1,56 +1,65 @@
 import csv
 import io
-from sqlalchemy import select
+
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from ai_service.app.models.connection import ConnectionModel
-from ai_service.app.models.candidate import CandidateModel
+
+
+class ConnectionCsvError(ValueError):
+    pass
+
+
+def parse_connections_csv(data: bytes) -> list[dict[str, str]]:
+    """Rows of LinkedIn's Connections.csv export (Settings → Data privacy → Get a copy of your data).
+
+    The export starts with a few "Notes:" lines before the real header, so reading starts at the header.
+    """
+    text = data.decode("utf-8-sig", errors="replace")
+    lines = text.splitlines()
+    start = next(
+        (i for i, line in enumerate(lines) if "first name" in line.lower() and "company" in line.lower()), None
+    )
+    if start is None:
+        raise ConnectionCsvError("This is not LinkedIn's Connections.csv (no 'First Name' and 'Company' columns)")
+    rows = []
+    for row in csv.DictReader(io.StringIO("\n".join(lines[start:]))):
+        clean = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        if clean.get("first name") and clean.get("company"):
+            rows.append(clean)
+    return rows
+
 
 class ConnectionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def import_csv(self, candidate_id: str, file_contents: bytes) -> int:
-        """Parses LinkedIn Connections CSV and stores them. Returns count."""
-        # Read file
-        text = file_contents.decode("utf-8-sig")
-        reader = csv.DictReader(io.StringIO(text))
-        
-        # Clear existing connections for candidate
-        # Using a simple approach for now, normally we'd delete in batches or use delete() statement
-        stmt = select(ConnectionModel).where(ConnectionModel.candidate_id == candidate_id)
-        existing = await self.session.scalars(stmt)
-        for c in existing:
-            await self.session.delete(c)
-            
-        count = 0
-        for row in reader:
-            first_name = row.get("First Name", "").strip()
-            last_name = row.get("Last Name", "").strip()
-            company = row.get("Company", "").strip()
-            position = row.get("Position", "").strip()
-            connected_on = row.get("Connected On", "").strip()
-            
-            if not first_name or not company:
-                continue
-                
-            conn = ConnectionModel(
+    async def import_csv(self, candidate_id: str, data: bytes) -> int:
+        """Replace the stored connections with those in the CSV. Returns how many were imported."""
+        rows = parse_connections_csv(data)
+        await self.session.execute(delete(ConnectionModel).where(ConnectionModel.candidate_id == candidate_id))
+        self.session.add_all(
+            ConnectionModel(
                 candidate_id=candidate_id,
-                first_name=first_name,
-                last_name=last_name,
-                company=company,
-                position=position,
-                connected_on=connected_on
+                first_name=row["first name"][:100],
+                last_name=row.get("last name", "")[:100],
+                company=row["company"][:200],
+                position=row.get("position", "")[:200],
+                connected_on=row.get("connected on", "")[:50] or None,
             )
-            self.session.add(conn)
-            count += 1
-            
+            for row in rows
+        )
         await self.session.commit()
-        return count
+        return len(rows)
+
+    async def count(self, candidate_id: str) -> int:
+        stmt = select(func.count()).select_from(ConnectionModel).where(ConnectionModel.candidate_id == candidate_id)
+        return await self.session.scalar(stmt) or 0
 
     async def find_by_company(self, candidate_id: str, company: str) -> list[ConnectionModel]:
-        """Finds connections at a specific company (case insensitive)."""
+        """Connections whose company contains `company` (case-insensitive)."""
         stmt = select(ConnectionModel).where(
-            ConnectionModel.candidate_id == candidate_id,
-            ConnectionModel.company.ilike(f"%{company}%")
+            ConnectionModel.candidate_id == candidate_id, ConnectionModel.company.ilike(f"%{company.strip()}%")
         )
-        return list(await self.session.scalars(stmt))
+        return list(await self.session.scalars(stmt.limit(50)))

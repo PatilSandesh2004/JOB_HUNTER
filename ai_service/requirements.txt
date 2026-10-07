@@ -31,5 +31,6 @@ pdfplumber>=0.11
 pypdf>=4.2
 python-docx>=1.1
 
-# Matching
+# Matching (fastembed: local resume-to-job similarity model, downloaded on first start)
 rapidfuzz>=3.9
+fastembed>=0.4

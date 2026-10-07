@@ -9,8 +9,8 @@ import re
 from dataclasses import dataclass
 
 from ai_service.app.schemas.candidate import CandidateProfile, WorkExperience
-from ai_service.app.services.resume.resume_layout import ResumeLayout
 from ai_service.app.schemas.job import NormalizedJob
+from ai_service.app.services.resume.resume_layout import ResumeLayout
 from ai_service.app.services.skills.catalog import normalize_skill_list, skill_pattern
 
 # Bullet separators: line breaks, bullet glyphs, or sentence ends inside a paragraph.

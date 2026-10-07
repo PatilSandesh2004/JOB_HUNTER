@@ -58,8 +58,11 @@ class NormalizedJob(BaseModel):
     salary_min: float | None = None
     salary_max: float | None = None
     salary_currency: str | None = None
-    experience_required: float | None = None
+    salary_period: str | None = None  # year | month | hour
+    experience_required: float | None = None  # minimum years asked for
+    experience_max: float | None = None  # upper end when the posting gives a range ("3-5 years")
     required_skills: list[str] = Field(default_factory=list)
+    preferred_skills: list[str] = Field(default_factory=list)  # nice-to-have
     visa_sponsorship: VisaSponsorshipEvidence = Field(default_factory=VisaSponsorshipEvidence)
     relocation: bool = False
     application_url: str
@@ -68,6 +71,7 @@ class NormalizedJob(BaseModel):
     verified: bool = False  # details confirmed through the ATS's API
     posted_at: datetime | None = None
     closed_at: datetime | None = None  # the job board reported the posting gone
+    first_seen_at: datetime | None = None  # when JobPilot first found it (for "new since your last visit")
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @computed_field

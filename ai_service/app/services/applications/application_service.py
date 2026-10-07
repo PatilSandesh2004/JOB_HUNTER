@@ -32,6 +32,7 @@ from ai_service.app.repositories.screening_answer_repository import ScreeningAns
 from ai_service.app.repositories.task_repository import TaskKind, TaskRepository, TaskStatus
 from ai_service.app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationStatus, ApplyMode
 from ai_service.app.services.jobs.ats import detect_ats
+from ai_service.app.services.resume.library import ResumeLibrary
 from ai_service.app.services.screening.answer_bank import AnswerBook, ScreeningSuggester
 from ai_service.app.services.tasks.runner import Handler, RetryLater, TaskFailed
 
@@ -42,9 +43,11 @@ IN_FLIGHT = {ApplicationStatus.PROCESSING, ApplicationStatus.SUBMITTING}
 MANUAL_STATUSES = {
     ApplicationStatus.APPLIED,
     ApplicationStatus.INTERVIEW,
+    ApplicationStatus.OFFER,
     ApplicationStatus.REJECTED,
     ApplicationStatus.DISMISSED,
 }
+FOLLOW_UP_STATUSES = {ApplicationStatus.APPLIED, ApplicationStatus.INTERVIEW}
 INTERRUPTED_SUBMIT = (
     "The service stopped while submitting this application, so it may or may not have gone through. "
     "Check your email or the company site before retrying to avoid a duplicate application."
@@ -53,6 +56,7 @@ _MODE_EVENT = {
     ApplyMode.REVIEW: "The agent will fill the form and wait for your approval",
     ApplyMode.AUTO: "The agent will fill the form and submit it if nothing needs your input",
     ApplyMode.MANUAL: "You apply on the company site; a cover letter is drafted for you",
+    ApplyMode.SAVE: "Saved to apply later",
 }
 
 
@@ -67,11 +71,13 @@ class ApplicationService:
         agent_factory: Callable[[], ApplicationAgent],
         max_attempts: int | None = None,
         suggester: ScreeningSuggester | None = None,
+        resume_library: ResumeLibrary | None = None,
     ):
         self.session_factory = session_factory
         self.agent_factory = agent_factory
         self.max_attempts = max_attempts or settings.task_max_attempts
         self.suggester = suggester
+        self.resume_library = resume_library
         # Set by the task runner so new work starts immediately instead of at the next poll.
         self.on_enqueue: Callable[[], None] = lambda: None
 
@@ -85,7 +91,7 @@ class ApplicationService:
     # ---- request-time operations ----------------------------------------
     async def create(self, session: AsyncSession, payload: ApplicationCreate) -> ApplicationRead:
         """Create (or reuse) an application and queue the agent work it needs."""
-        manual = payload.mode == ApplyMode.MANUAL
+        manual = payload.mode in (ApplyMode.MANUAL, ApplyMode.SAVE)  # no form filling
         candidate = await CandidateRepository(session).get_active()
         if not manual and (candidate is None or not candidate.name or not candidate.email):
             raise ApplicationConflictError("Complete your profile (at least name and email) before auto-filling")
@@ -102,8 +108,11 @@ class ApplicationService:
 
         repo = ApplicationRepository(session)
         existing = await repo.find_open_for_job(payload.job_id)
+        if existing is not None and existing.status == ApplicationStatus.SAVED.value and payload.mode != ApplyMode.SAVE:
+            return await self._start_saved(session, repo, existing, payload, candidate.preferences.tailor_resume)
         if existing is not None:
             status = ApplicationStatus(existing.status)
+            manual = payload.mode == ApplyMode.MANUAL
             if manual and status in APPROVABLE:
                 existing = await repo.update(
                     existing,
@@ -116,25 +125,69 @@ class ApplicationService:
             return to_schema(existing)
 
         tailor = candidate.preferences.tailor_resume if payload.tailor_resume is None else payload.tailor_resume
+        saving = payload.mode == ApplyMode.SAVE
+        status = (
+            ApplicationStatus.SAVED
+            if saving
+            else ApplicationStatus.AWAITING_CONFIRMATION
+            if manual
+            else ApplicationStatus.PROCESSING
+        )
         row = await repo.create(
             candidate_id=candidate.id,
             job_id=job_row.id,
             job_title=job_row.title,
             company=job_row.company,
             application_url=job_row.application_url,
-            status=(ApplicationStatus.AWAITING_CONFIRMATION if manual else ApplicationStatus.PROCESSING).value,
+            status=status.value,
             mode=payload.mode.value,
             cover_letter=payload.cover_letter,
             cover_letter_source="user" if payload.cover_letter else None,
-            events=[timeline_event("Application created", _MODE_EVENT[payload.mode])],
+            events=[timeline_event("Saved" if saving else "Application created", _MODE_EVENT[payload.mode])],
             questions=[],
         )
+        if saving:
+            return to_schema(row)
         if not manual:
             submit = payload.mode == ApplyMode.AUTO
             await self._enqueue(session, TaskKind.FILL_APPLICATION, row.id, submit=submit, tailor=tailor)
         elif not payload.cover_letter:
             await self._enqueue(session, TaskKind.DRAFT_COVER_LETTER, row.id)
         return to_schema(row)
+
+    async def _start_saved(
+        self,
+        session: AsyncSession,
+        repo: ApplicationRepository,
+        row: ApplicationModel,
+        payload: ApplicationCreate,
+        default_tailor: bool,
+    ) -> ApplicationRead:
+        """Turn a saved job into a real application in the chosen mode."""
+        manual = payload.mode == ApplyMode.MANUAL
+        row = await repo.update(
+            row,
+            status=(ApplicationStatus.AWAITING_CONFIRMATION if manual else ApplicationStatus.PROCESSING).value,
+            mode=payload.mode.value,
+            cover_letter=payload.cover_letter or row.cover_letter,
+            cover_letter_source="user" if payload.cover_letter else row.cover_letter_source,
+            events=[timeline_event("Started from your saved jobs", _MODE_EVENT[payload.mode])],
+        )
+        if not manual:
+            tailor = default_tailor if payload.tailor_resume is None else payload.tailor_resume
+            submit = payload.mode == ApplyMode.AUTO
+            await self._enqueue(session, TaskKind.FILL_APPLICATION, row.id, submit=submit, tailor=tailor)
+        elif not row.cover_letter:
+            await self._enqueue(session, TaskKind.DRAFT_COVER_LETTER, row.id)
+        return to_schema(row)
+
+    async def follow_up(self, session: AsyncSession, application_id: str, note: str = "") -> ApplicationRead:
+        """Record that you followed up with the company; the follow-up reminder starts again."""
+        repo = ApplicationRepository(session)
+        row = await self._get(repo, application_id)
+        if ApplicationStatus(row.status) not in FOLLOW_UP_STATUSES:
+            raise ApplicationConflictError("Follow-ups are for applications you have sent")
+        return to_schema(await repo.update(row, events=[timeline_event("Followed up with the company", note)]))
 
     async def approve(self, session: AsyncSession, application_id: str) -> ApplicationRead:
         """Human approval: queue a fill-and-submit with the (possibly edited) cover letter."""
@@ -237,6 +290,16 @@ class ApplicationService:
                     raise NotFoundError("Candidate or job no longer exists")
                 candidate = candidate_to_schema(candidate_row)
                 job_with_match = job_repository.to_schema(job_row)
+                resume_path = candidate_row.resume_path
+                choice = (
+                    await self.resume_library.best_for(session, candidate_row, job_with_match.job)
+                    if self.resume_library
+                    else None
+                )
+                if choice is not None:
+                    resume_path = choice.path
+                    covers = f"covers {choice.covered} of {choice.wanted} required skills" if choice.wanted else ""
+                    started.append(timeline_event(f"Attaching your resume version '{choice.label}'", covers))
                 answers = AnswerBook(
                     saved=await ScreeningAnswerRepository(session).as_lookup(),
                     willing_to_relocate=candidate.preferences.willing_to_relocate,
@@ -246,7 +309,7 @@ class ApplicationService:
                     candidate=candidate,
                     job=job_with_match.job,
                     matched_skills=job_with_match.match.matched_skills if job_with_match.match else [],
-                    resume_path=candidate_row.resume_path,
+                    resume_path=resume_path,
                     cover_letter=row.cover_letter,
                     cover_letter_source=row.cover_letter_source,
                     submit=submit,

@@ -12,15 +12,24 @@ from ai_service.app.integrations.search.searxng_client import SearXNGClient
 from ai_service.app.integrations.search.serper_client import SerperClient
 from ai_service.app.services.applications.application_service import ApplicationService
 from ai_service.app.services.applications.insights_service import ApplicationInsightsService
+from ai_service.app.services.applications.interview_coach import InterviewCoach
 from ai_service.app.services.applications.tailoring_service import ApplicationTailoringService
 from ai_service.app.services.inbox.inbox_service import InboxService
 from ai_service.app.services.jobs.enrichment_service import JobEnrichmentService
 from ai_service.app.services.jobs.recheck_service import JobRecheckService
+from ai_service.app.services.matching.reviewer import JobReviewer
+from ai_service.app.services.matching.semantic import SemanticMatcher
+from ai_service.app.services.notifications.alerts import MatchAlertService
+from ai_service.app.services.notifications.digest import DigestService
+from ai_service.app.services.notifications.email_service import EmailService
 from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
+from ai_service.app.services.resume.library import ResumeLibrary
+from ai_service.app.services.resume.resume_check import ResumeCheckService
 from ai_service.app.services.resume.resume_parser import ResumeParserService
 from ai_service.app.services.screening.answer_bank import ScreeningSuggester
 from ai_service.app.services.search.board_source import BoardSearchSource
 from ai_service.app.services.search.discovery_service import DiscoveryService
+from ai_service.app.services.search.saved_search_service import SavedSearchService
 from ai_service.app.services.search.search_service import SearchService
 from ai_service.app.services.tasks.runner import PeriodicJob, TaskRunner
 
@@ -43,9 +52,25 @@ def get_board_source() -> BoardSearchSource:
 
 
 @lru_cache
+def get_semantic_matcher() -> SemanticMatcher:
+    return SemanticMatcher()
+
+
+@lru_cache
+def get_job_reviewer() -> JobReviewer:
+    return JobReviewer(get_llm())
+
+
+@lru_cache
 def get_search_agent() -> SearchAgent:
     service = SearchService(get_searxng(), board_source=get_board_source())
-    return SearchAgent(service, get_llm(), enricher=JobEnrichmentService())
+    return SearchAgent(
+        service,
+        get_llm(),
+        enricher=JobEnrichmentService(),
+        semantic=get_semantic_matcher(),
+        reviewer=get_job_reviewer(),
+    )
 
 
 @lru_cache
@@ -54,8 +79,25 @@ def get_resume_parser() -> ResumeParserService:
 
 
 @lru_cache
-def get_notifier() -> WebhookNotificationService:
-    return WebhookNotificationService(settings.notification_webhook_url, settings.high_match_threshold)
+def get_resume_library() -> ResumeLibrary:
+    return ResumeLibrary(get_resume_parser())
+
+
+@lru_cache
+def get_resume_check_service() -> ResumeCheckService:
+    return ResumeCheckService(get_llm())
+
+
+@lru_cache
+def get_interview_coach() -> InterviewCoach:
+    return InterviewCoach(get_llm())
+
+
+@lru_cache
+def get_notifier() -> MatchAlertService:
+    return MatchAlertService(
+        settings.high_match_threshold, WebhookNotificationService(settings.notification_webhook_url), EmailService()
+    )
 
 
 @lru_cache
@@ -64,11 +106,14 @@ def get_application_service() -> ApplicationService:
         AsyncSessionLocal,
         agent_factory=lambda: ApplicationAgent(ApplicationTailoringService(get_llm())),
         suggester=ScreeningSuggester(get_llm()),
+        resume_library=get_resume_library(),
     )
+
 
 @lru_cache
 def get_insights_service() -> ApplicationInsightsService:
-    return ApplicationInsightsService(AsyncSessionLocal, get_llm())
+    return ApplicationInsightsService(get_llm())
+
 
 @lru_cache
 def get_job_recheck_service() -> JobRecheckService:
@@ -87,7 +132,19 @@ def get_inbox_service() -> InboxService:
 
 @lru_cache
 def get_discovery_service() -> DiscoveryService:
-    return DiscoveryService(AsyncSessionLocal, get_search_agent, get_notifier(), application_service=get_application_service())
+    return DiscoveryService(
+        AsyncSessionLocal, get_search_agent, get_notifier(), application_service=get_application_service()
+    )
+
+
+@lru_cache
+def get_saved_search_service() -> SavedSearchService:
+    return SavedSearchService(AsyncSessionLocal, get_search_agent, get_notifier())
+
+
+@lru_cache
+def get_digest_service() -> DigestService:
+    return DigestService(AsyncSessionLocal, EmailService())
 
 
 @lru_cache
@@ -107,6 +164,9 @@ def get_task_runner() -> TaskRunner:
         periodic.append(
             PeriodicJob("discovery", settings.discovery_interval_hours * 3600, discovery.run_quietly, initial_delay=300)
         )
+    periodic.append(PeriodicJob("saved-searches", 15 * 60, get_saved_search_service().run_due, initial_delay=180))
+    if settings.alert_digest_hours > 0 or settings.weekly_report_email:
+        periodic.append(PeriodicJob("digests", 3600, get_digest_service().run_due, initial_delay=600))
     if settings.job_recheck_interval_hours > 0:
         recheck = get_job_recheck_service()
         periodic.append(
