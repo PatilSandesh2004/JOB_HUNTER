@@ -13,6 +13,8 @@ class SearchQueryRequest(BaseModel):
         default_factory=list, description="Cities/countries and/or 'Remote'. Empty: from your profile"
     )
     remote_only: bool = False
+    experience: str = Field(default="ANY", description="Experience filter range e.g. 0-2, 1-3, 2-4, 3-5, 4-6, 5-8, 8+")
+    posted_within: str = Field(default="any", description="Date posted filter: any, 24h, 7d, 30d")
     sponsorship_required: bool = Field(default=False, description="Drop jobs that explicitly refuse sponsorship")
     strict_location: bool = Field(default=True, description="Drop jobs outside the requested locations")
     max_results: int = Field(default=60, ge=1, le=200)

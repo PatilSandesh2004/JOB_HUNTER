@@ -9,7 +9,9 @@ from ai_service.app.database.session import AsyncSessionLocal
 from ai_service.app.integrations.llm.llm_client import LLMClient
 from ai_service.app.integrations.mail.imap_reader import ImapReader
 from ai_service.app.integrations.search.searxng_client import SearXNGClient
+from ai_service.app.integrations.search.serper_client import SerperClient
 from ai_service.app.services.applications.application_service import ApplicationService
+from ai_service.app.services.applications.insights_service import ApplicationInsightsService
 from ai_service.app.services.applications.tailoring_service import ApplicationTailoringService
 from ai_service.app.services.inbox.inbox_service import InboxService
 from ai_service.app.services.jobs.enrichment_service import JobEnrichmentService
@@ -29,7 +31,9 @@ def get_llm() -> LLMClient:
 
 
 @lru_cache
-def get_searxng() -> SearXNGClient:
+def get_searxng() -> SearXNGClient | SerperClient:
+    if settings.web_search_provider.lower() == "serper":
+        return SerperClient(settings.serper_api_key, settings.searxng_timeout_seconds)
     return SearXNGClient(settings.searxng_url, settings.searxng_timeout_seconds)
 
 
@@ -62,6 +66,9 @@ def get_application_service() -> ApplicationService:
         suggester=ScreeningSuggester(get_llm()),
     )
 
+@lru_cache
+def get_insights_service() -> ApplicationInsightsService:
+    return ApplicationInsightsService(AsyncSessionLocal, get_llm())
 
 @lru_cache
 def get_job_recheck_service() -> JobRecheckService:
@@ -75,12 +82,12 @@ def get_inbox_service() -> InboxService:
         reader = ImapReader(
             settings.imap_host, settings.imap_port, settings.imap_user, settings.imap_password, settings.imap_folder
         )
-    return InboxService(AsyncSessionLocal, reader, notifier=get_notifier())
+    return InboxService(AsyncSessionLocal, reader, notifier=get_notifier(), llm=get_llm())
 
 
 @lru_cache
 def get_discovery_service() -> DiscoveryService:
-    return DiscoveryService(AsyncSessionLocal, get_search_agent, get_notifier())
+    return DiscoveryService(AsyncSessionLocal, get_search_agent, get_notifier(), application_service=get_application_service())
 
 
 @lru_cache

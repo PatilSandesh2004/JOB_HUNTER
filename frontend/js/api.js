@@ -134,6 +134,9 @@ export const api = {
     recheckJobs: () => request('/jobs/recheck?force=true', { method: 'POST' }),
     hideJob: (id) => request(`/jobs/${encodeURIComponent(id)}/hide`, { method: 'POST' }),
     unhideJob: (id) => request(`/jobs/${encodeURIComponent(id)}/unhide`, { method: 'POST' }),
+    getInsiders: (id) => request(`/jobs/${encodeURIComponent(id)}/insiders`),
+    getCompanyContacts: (company) => request(`/jobs/company-contacts?company=${encodeURIComponent(company)}`),
+    generateOutreach: (data) => request('/jobs/outreach-message', { method: 'POST', body: data }),
 
     // Company job boards searched directly (watchlist), and the job-alert inbox.
     listBoards: () => request('/boards'),
@@ -149,17 +152,23 @@ export const api = {
         form.append('file', file);
         return request('/candidates/me/resume', { method: 'POST', form });
     },
+    uploadConnections: (file) => {
+        const form = new FormData();
+        form.append('file', file);
+        return request('/candidates/me/connections/upload', { method: 'POST', form });
+    },
 
     listApplications: () => request('/applications'),
     // mode: 'review' (agent fills, you approve) | 'auto' (agent submits) | 'manual' (you apply on the site)
-    createApplication: (jobId, mode = 'review') =>
-        request('/applications', { method: 'POST', body: { job_id: jobId, mode } }),
+    createApplication: (jobId, mode = 'review', tailorResume = null) =>
+        request('/applications', { method: 'POST', body: { job_id: jobId, mode, tailor_resume: tailorResume } }),
     updateApplication: (id, patch) => request(`/applications/${id}`, { method: 'PATCH', body: patch }),
     approveApplication: (id) => request(`/applications/${id}/approve`, { method: 'POST' }),
     refillApplication: (id) => request(`/applications/${id}/refill`, { method: 'POST' }),
     screenshotUrl: (id) => blobUrl(`/applications/${id}/screenshot`),
     stepScreenshotUrl: (id, name) => blobUrl(`/applications/${id}/screenshots/${encodeURIComponent(name)}`),
     tailoredResumeUrl: (id) => blobUrl(`/applications/${id}/resume`),
+    getApplicationInsights: (id) => request(`/applications/${id}/insights`),
 
     // Answer bank: [{question, answer, source}]; an empty answer deletes the saved one.
     listAnswers: () => request('/screening-answers'),

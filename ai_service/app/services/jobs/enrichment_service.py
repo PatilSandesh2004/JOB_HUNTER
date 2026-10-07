@@ -45,7 +45,7 @@ class JobEnrichmentService:
         """Return (postings with verified details, number of closed postings dropped)."""
         ashby_boards: dict[str, asyncio.Task] = {}
         async with httpx.AsyncClient(
-            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport
+            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport, verify=False
         ) as client:
             outcomes = await asyncio.gather(*(self._enrich_one(p, client, ashby_boards) for p in postings))
         kept = [p for p in outcomes if p is not None]
@@ -56,7 +56,7 @@ class JobEnrichmentService:
         postings = [RawJobPosting(title="", url=url, source="recheck") for url in urls]
         ashby_boards: dict[str, asyncio.Task] = {}
         async with httpx.AsyncClient(
-            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport
+            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport, verify=False
         ) as client:
             outcomes = await asyncio.gather(*(self._enrich_one(p, client, ashby_boards) for p in postings))
         return [False if o is None else (True if o.verified else None) for o in outcomes]

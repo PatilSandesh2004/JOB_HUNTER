@@ -36,6 +36,7 @@ class CandidatePreferences(BaseModel):
     notice_period: str | None = None
     blocked_companies: list[str] = Field(default_factory=list)  # never show jobs from these
     tailor_resume: bool = False  # attach a per-job tailored PDF instead of the uploaded resume
+    auto_apply_high_matches: bool = False  # Full Auto-Pilot: automatically apply to >85% matches
 
 
 class CandidateProfile(BaseModel):

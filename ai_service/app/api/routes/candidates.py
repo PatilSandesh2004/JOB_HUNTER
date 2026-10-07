@@ -57,3 +57,25 @@ def _merge_into(current: CandidateProfile, parsed: CandidateProfile) -> Candidat
         if value not in (None, "", [], 0, 0.0):
             data[key] = value
     return CandidateProfile.model_validate(data)
+
+@router.post("/me/connections/upload")
+async def upload_connections(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a LinkedIn Connections CSV file."""
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Must be a .csv file")
+        
+    candidate = await CandidateRepository(db).get_active()
+    if not candidate:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Create a profile first")
+        
+    data = await file.read(1024 * 1024 * 5) # max 5MB
+    from ai_service.app.repositories.connection_repository import ConnectionRepository
+    repo = ConnectionRepository(db)
+    try:
+        count = await repo.import_csv(candidate.id, data)
+        return {"message": f"Successfully imported {count} connections.", "count": count}
+    except Exception as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Failed to parse CSV: {str(e)}")

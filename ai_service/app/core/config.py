@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     max_resume_bytes: int = 10 * 1024 * 1024
 
     # Search
+    web_search_provider: str = "searxng"  # "searxng" or "serper"
+    serper_api_key: str = ""
     searxng_url: str = "http://localhost:8080"
     searxng_timeout_seconds: float = 20.0
     searxng_max_concurrency: int = 4
@@ -50,7 +52,17 @@ class Settings(BaseSettings):
     search_enable_arbeitnow: bool = True
     # Job sites searched through SearXNG (site: queries for the leading query only, to limit engine load).
     # Their postings are listed as "Apply manually": applying there needs your own login. [] disables.
-    search_job_sites: list[str] = Field(default_factory=lambda: ["linkedin.com/jobs/view", "naukri.com", "indeed.com"])
+    search_job_sites: list[str] = Field(default_factory=lambda: [
+        "linkedin.com/jobs/view", "naukri.com", "in.indeed.com",
+        "foundit.in", "cutshort.io", "instahyre.com", "hirist.tech",
+        "hirect.in", "shine.com", "timesjobs.com", "freshersworld.com",
+        "glassdoor.co.in", "wellfound.com", "ycombinator.com", "workatastartup.com",
+        "startup.jobs", "weworkremotely.com", "remoteok.com", "remotive.com",
+        "himalayas.app", "remote.co", "workingnomads.com", "jobgether.com",
+        "arc.dev", "turing.com", "toptal.com", "flexjobs.com", "remotejobs.co",
+        "ai-jobs.net", "aijobs.ai", "datasciencejobs.com", "kaggle.com",
+        "huggingface.co", "mljobs.com"
+    ])
     external_api_timeout_seconds: float = 10.0
 
     # LLM (Groq)
@@ -95,6 +107,13 @@ class Settings(BaseSettings):
     # Matching & notifications
     high_match_threshold: float = 85.0
     notification_webhook_url: str = ""
+    
+    # Email Alerts (SMTP)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "alerts@jobpilot.local"
 
     @property
     def inbox_enabled(self) -> bool:

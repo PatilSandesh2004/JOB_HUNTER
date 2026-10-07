@@ -181,6 +181,7 @@ class BoardSearchSource:
             headers={"Accept": "application/json, text/xml"},
             transport=self.transport,
             follow_redirects=True,
+            verify=False,
         )
 
     async def search(self, titles: list[str], locations: list[str]) -> list[RawJobPosting]:

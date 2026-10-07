@@ -20,7 +20,7 @@ async def render_pdf(html: str, path: Path) -> Path:
                 # The document is self-contained; block any network access it might attempt.
                 await page.route("**/*", lambda route: route.abort())
                 await page.set_content(html, wait_until="domcontentloaded")
-                await page.pdf(path=str(path), format="A4", print_background=True, margin=_MARGIN)
+                await page.pdf(path=str(path), format="A4", print_background=True, margin=_MARGIN, prefer_css_page_size=True)
             finally:
                 await browser.close()
         return path

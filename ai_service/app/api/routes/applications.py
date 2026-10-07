@@ -12,6 +12,7 @@ from ai_service.app.database.session import get_db
 from ai_service.app.repositories.application_repository import ApplicationRepository, to_schema
 from ai_service.app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationStatus
 from ai_service.app.services.applications.application_service import ApplicationService
+from ai_service.app.api.deps import get_insights_service
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -61,6 +62,18 @@ async def update_application(
 ):
     """Edit the cover letter, or record an outcome (APPLIED / INTERVIEW / REJECTED / DISMISSED)."""
     return await service.update(db, application_id, patch.cover_letter, patch.status)
+
+@router.get("/{application_id}/insights")
+async def get_application_insights(
+    application_id: str,
+    db: AsyncSession = Depends(get_db),
+    service = Depends(get_insights_service)
+):
+    """Generate interview preparation insights."""
+    try:
+        return await service.generate_insights(application_id, db)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
 
 
 @router.post("/{application_id}/approve", response_model=ApplicationRead, status_code=status.HTTP_202_ACCEPTED)

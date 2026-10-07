@@ -13,6 +13,7 @@ from ai_service.app.integrations.browser.pdf_renderer import render_pdf
 from ai_service.app.schemas.candidate import CandidateProfile
 from ai_service.app.schemas.job import NormalizedJob
 from ai_service.app.services.applications.tailoring_service import ApplicationTailoringService
+from ai_service.app.services.resume.resume_layout import analyze_resume_layout
 from ai_service.app.services.resume.resume_tailor import ResumeTailor
 from ai_service.app.services.screening.answer_bank import AnswerBook
 
@@ -117,7 +118,9 @@ class ApplicationAgent:
         target = state.get("tailored_resume_target")
         if not state.get("tailor_resume") or target is None:
             return out
-        built = self.resume_tailor.build(candidate, job)
+        # state["resume_path"] is still the user's uploaded file here; mirror its look.
+        layout = await asyncio.to_thread(analyze_resume_layout, state.get("resume_path"))
+        built = self.resume_tailor.build(candidate, job, layout)
         if built is None:
             events.append(timeline_event("Resume not tailored", "Add skills or work experience to your profile first"))
             return out

@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 
 from ai_service.app.schemas.candidate import CandidateProfile, WorkExperience
+from ai_service.app.services.resume.resume_layout import ResumeLayout
 from ai_service.app.schemas.job import NormalizedJob
 from ai_service.app.services.skills.catalog import normalize_skill_list, skill_pattern
 
@@ -37,12 +38,17 @@ class ResumeTailor:
             "keyword_coverage": round(100 * len(matched) / len(wanted), 1) if wanted else 0.0,
         }
 
-    def build(self, candidate: CandidateProfile, job: NormalizedJob) -> TailoredResume | None:
-        """None when the profile is too thin to produce a resume worth attaching."""
+    def build(
+        self, candidate: CandidateProfile, job: NormalizedJob, layout: ResumeLayout | None = None
+    ) -> TailoredResume | None:
+        """None when the profile is too thin to produce a resume worth attaching.
+
+        With `layout` (read from the uploaded resume) the result keeps its fonts, section names and order.
+        """
         if not candidate.name or not (candidate.skills or candidate.work_experience):
             return None
         report = self.report(candidate, job)
-        return TailoredResume(html=_render(candidate, report["matched_skills"]), report=report)
+        return TailoredResume(html=_render(candidate, report["matched_skills"], layout), report=report)
 
 
 def _bullets(description: str | None) -> list[str]:
@@ -83,7 +89,9 @@ def _experience_html(work: WorkExperience, matched: list[str]) -> str:
     )
 
 
-def _render(candidate: CandidateProfile, matched: list[str]) -> str:
+def _render(candidate: CandidateProfile, matched: list[str], layout: ResumeLayout | None = None) -> str:
+    lay = layout or ResumeLayout()
+    heading = lambda key, default: html.escape(lay.label(key, default))  # noqa: E731
     contact = " · ".join(
         html.escape(v)
         for v in (
@@ -101,14 +109,14 @@ def _render(candidate: CandidateProfile, matched: list[str]) -> str:
         f"<strong>{html.escape(s)}</strong>" if s.lower() in matched_lower else html.escape(s)
         for s in _ordered_skills(candidate, matched)
     )
-    sections = []
+    built: dict[str, str] = {}
     if candidate.summary:
-        sections.append(f"<h2>Summary</h2><p>{html.escape(candidate.summary)}</p>")
+        built["summary"] = f"<h2>{heading('summary', 'Summary')}</h2><p>{html.escape(candidate.summary)}</p>"
     if skills:
-        sections.append(f"<h2>Skills</h2><p>{skills}</p>")
+        built["skills"] = f"<h2>{heading('skills', 'Skills')}</h2><p>{skills}</p>"
     if candidate.work_experience:
         roles = "".join(_experience_html(w, matched) for w in candidate.work_experience)
-        sections.append(f"<h2>Experience</h2>{roles}")
+        built["experience"] = f"<h2>{heading('experience', 'Experience')}</h2>{roles}"
     if candidate.education:
         rows = "".join(
             "<p>"
@@ -119,14 +127,26 @@ def _render(candidate: CandidateProfile, matched: list[str]) -> str:
             + f"{html.escape(e.institution)}{f' ({e.graduation_year})' if e.graduation_year else ''}</p>"
             for e in candidate.education
         )
-        sections.append(f"<h2>Education</h2>{rows}")
+        built["education"] = f"<h2>{heading('education', 'Education')}</h2>{rows}"
+    for i, (label, lines) in enumerate(lay.extras):
+        body = "".join(f"<p>{html.escape(ln)}</p>" for ln in lines)
+        built[f"extra:{i}"] = f"<h2>{html.escape(label)}</h2>{body}"
+    default_order = ["summary", "skills", "experience", "education"]
+    # Original section order first; sections the original lacked follow in the default order.
+    keys = [k for k in lay.order if k in built] + [k for k in default_order if k in built and k not in lay.order]
+    sections = [built[k] for k in keys]
+    align = "center" if lay.centered_header else "left"
+    upper = "uppercase" if lay.heading_upper else "none"
+    rule = f"border-bottom: 1px solid {lay.heading_color};" if lay.heading_rule else ""
+    vm, hm = lay.margin_mm
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>{html.escape(candidate.name)}</title>
 <style>
-  body {{ font-family: Arial, Helvetica, sans-serif; font-size: 10.5pt; color: #111; line-height: 1.4; margin: 0; }}
-  h1 {{ font-size: 20pt; margin: 0 0 2pt; }}
-  .contact {{ color: #444; font-size: 9.5pt; margin-bottom: 10pt; }}
-  h2 {{ font-size: 11pt; text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid #999;
-        margin: 12pt 0 5pt; padding-bottom: 2pt; }}
+  @page {{ size: A4; margin: {vm:.1f}mm {hm:.1f}mm; }}
+  body {{ font-family: {lay.font_stack}; font-size: {lay.body_pt}pt; color: #111; line-height: 1.4; margin: 0; }}
+  h1 {{ font-size: {lay.name_pt}pt; margin: 0 0 2pt; text-align: {align}; }}
+  .contact {{ color: #444; font-size: {max(lay.body_pt - 1, 8)}pt; margin-bottom: 10pt; text-align: {align}; }}
+  h2 {{ font-size: {lay.heading_pt}pt; color: {lay.heading_color}; text-transform: {upper}; letter-spacing: .04em;
+        {rule} margin: 12pt 0 5pt; padding-bottom: 2pt; }}
   p {{ margin: 0 0 4pt; }}
   .role {{ margin-bottom: 7pt; page-break-inside: avoid; }}
   .role-head {{ display: flex; justify-content: space-between; gap: 12pt; }}

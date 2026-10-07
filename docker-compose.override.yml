@@ -1,0 +1,11 @@
+# Local development: mount the source so code changes need only a restart (no image rebuild).
+#   Python:   docker compose restart ai_service
+#   Frontend: just refresh the browser (Ctrl+Shift+R)
+# Docker Compose loads this file automatically. Delete it (or use `-f docker-compose.yml`) for production.
+services:
+  ai_service:
+    volumes:
+      - ./ai_service:/app/ai_service:ro
+  gateway:
+    volumes:
+      - ./frontend:/app/frontend:ro

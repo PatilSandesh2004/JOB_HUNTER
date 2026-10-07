@@ -1,33 +1,47 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JobPilot</title>
+    <title>JobPilot — Smart AI Job Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
+
 <body>
     <header class="navbar">
         <div class="logo-container">
             <div class="logo-icon"><i class="fa-solid fa-paper-plane"></i></div>
             <span class="brand-name">JobPilot</span>
+            <span class="brand-badge">PRO</span>
         </div>
 
-        <nav class="nav-links" aria-label="Sections">
-            <button class="nav-btn active" data-tab="discover-tab"><i class="fa-solid fa-magnifying-glass"></i> Discover</button>
+        <nav class="nav-links" aria-label="Main Navigation">
+            <button class="nav-btn active" data-tab="jobs-tab">
+                <i class="fa-solid fa-briefcase"></i> Jobs
+            </button>
             <button class="nav-btn" data-tab="applications-tab">
-                <i class="fa-solid fa-user-check"></i> Applications
+                <i class="fa-solid fa-paper-plane"></i> Applications
                 <span class="badge-count" id="review-count" hidden>0</span>
             </button>
-            <button class="nav-btn" data-tab="profile-tab"><i class="fa-solid fa-id-card"></i> Profile</button>
-            <button class="nav-btn" data-tab="system-tab"><i class="fa-solid fa-server"></i> System</button>
+            <button class="nav-btn" data-tab="prepare-tab">
+                <i class="fa-solid fa-brain"></i> Prepare
+            </button>
+            <button class="nav-btn" data-tab="network-tab">
+                <i class="fa-solid fa-users"></i> Network
+            </button>
+            <button class="nav-btn" data-tab="profile-tab">
+                <i class="fa-solid fa-user-gear"></i> Profile Settings
+            </button>
         </nav>
 
-        <div class="user-profile">
+        <div class="user-profile" id="user-profile-header">
             <div class="avatar" id="nav-avatar">?</div>
             <div class="user-info">
                 <span class="user-name" id="nav-name">No profile yet</span>
@@ -37,131 +51,327 @@
     </header>
 
     <main class="main-container">
-        <!-- DISCOVER -->
-        <section id="discover-tab" class="tab-content active">
+        <!-- 1. JOBS TAB -->
+        <section id="jobs-tab" class="tab-content active">
             <div class="hero-card">
                 <div class="hero-content">
-                    <h1>Find jobs that fit, then apply with one review</h1>
-                    <p>Searches SearXNG (Greenhouse, Lever, Ashby, Workable), Remotive and Arbeitnow, then ranks every posting against your profile.</p>
+                    <h1>Jobs Tailored to Your Experience</h1>
+                    <p>Searches top tech job boards (Greenhouse, Lever, Ashby, Workable) and filters out non-matching
+                        experience levels.</p>
                 </div>
 
                 <form id="search-form" class="search-box-group">
                     <label class="input-field">
                         <i class="fa-solid fa-briefcase"></i>
-                        <input type="text" id="role-input" placeholder="Roles, comma separated" required>
+                        <input type="text" id="role-input" placeholder="Role or keywords (e.g. AI Engineer, Python)">
                     </label>
-                    <label class="input-field">
+                    <label class="input-field location-field">
                         <i class="fa-solid fa-location-dot"></i>
-                        <input type="text" id="location-input" placeholder="Locations (or Remote)">
+                        <input type="text" id="location-input" placeholder="Location (e.g. India, Remote)"
+                            autocomplete="off">
+                        <button type="button" id="location-clear" class="loc-clear" title="Clear locations"
+                            aria-label="Clear locations" hidden>&times;</button>
+                        <ul id="location-suggestions" class="loc-suggest" hidden></ul>
+                    </label>
+                    <label class="input-field" title="Years of Experience Filter">
+                        <i class="fa-solid fa-user-clock"></i>
+                        <select id="exp-input"
+                            style="background:transparent; border:none; color:inherit; outline:none; font-size:0.9rem; width:100%;">
+                            <option value="ANY" style="background:var(--bg-card); color:var(--text-main);">Any
+                                Experience</option>
+                            <option value="0-2" style="background:var(--bg-card); color:var(--text-main);">0 – 2 Years
+                                (Entry)</option>
+                            <option value="1-3" style="background:var(--bg-card); color:var(--text-main);">1 – 3 Years
+                                (Junior / Mid)</option>
+                            <option value="2-4" style="background:var(--bg-card); color:var(--text-main);">2 – 4 Years
+                                (Mid Level)</option>
+                            <option value="3-5" style="background:var(--bg-card); color:var(--text-main);">3 – 5 Years
+                                (Mid-Senior)</option>
+                            <option value="4-6" style="background:var(--bg-card); color:var(--text-main);">4 – 6 Years
+                                (Senior)</option>
+                            <option value="5-8" style="background:var(--bg-card); color:var(--text-main);">5 – 8 Years
+                                (Senior / Lead)</option>
+                            <option value="8+" style="background:var(--bg-card); color:var(--text-main);">8+ Years (Lead
+                                / Staff)</option>
+                        </select>
+                    </label>
+                    <label class="input-field" title="Job posted date filter">
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <select id="posted-input"
+                            style="background:transparent; border:none; color:inherit; outline:none; font-size:0.9rem; width:100%;">
+                            <option value="any" style="background:var(--bg-card); color:var(--text-main);">Any time
+                            </option>
+                            <option value="24h" style="background:var(--bg-card); color:var(--text-main);">Past 24 hours
+                            </option>
+                            <option value="7d" style="background:var(--bg-card); color:var(--text-main);">Past week
+                            </option>
+                            <option value="30d" style="background:var(--bg-card); color:var(--text-main);">Past month
+                            </option>
+                        </select>
                     </label>
                     <div class="toggle-group">
-                        <label class="toggle-field" title="Hide jobs outside these locations (and remote jobs closed to your country)">
-                            <span class="switch"><input type="checkbox" id="exact-toggle" checked><span class="slider"></span></span>
-                            <span class="toggle-label">Only these locations</span>
+                        <label class="toggle-field" title="Hide jobs outside these locations">
+                            <span class="switch"><input type="checkbox" id="exact-toggle" checked><span
+                                    class="slider"></span></span>
+                            <span class="toggle-label">Strict Location</span>
                         </label>
                         <label class="toggle-field">
-                            <span class="switch"><input type="checkbox" id="remote-toggle"><span class="slider"></span></span>
+                            <span class="switch"><input type="checkbox" id="remote-toggle"><span
+                                    class="slider"></span></span>
                             <span class="toggle-label">Remote only</span>
                         </label>
                         <label class="toggle-field">
-                            <span class="switch"><input type="checkbox" id="visa-toggle"><span class="slider"></span></span>
-                            <span class="toggle-label">Needs sponsorship</span>
+                            <span class="switch"><input type="checkbox" id="visa-toggle"><span
+                                    class="slider"></span></span>
+                            <span class="toggle-label">Visa Sponsorship</span>
                         </label>
                     </div>
                     <div class="search-buttons">
                         <button type="submit" id="btn-search" class="btn-primary">
-                            <i class="fa-solid fa-magnifying-glass"></i> Search
-                        </button>
-                        <button type="button" id="btn-auto-search" class="btn-secondary" title="Build searches from your resume: roles, seniority, skills and location">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i> From my resume
+                            <i class="fa-solid fa-magnifying-glass"></i> Search Jobs
                         </button>
                     </div>
                 </form>
-                <p class="search-hint">Tip: add <strong>Remote</strong> to locations to include remote jobs open to your country.</p>
+
+                <div class="resume-bar">
+                    <label class="resume-choice" for="resume-choice">
+                        <i class="fa-solid fa-file-lines"></i> Application Resume Mode:
+                        <select id="resume-choice">
+                            <option value="original">Use my original uploaded resume</option>
+                            <option value="tailored">Tailor resume to each job requirements</option>
+                        </select>
+                    </label>
+                </div>
                 <p class="search-meta" id="search-meta"></p>
             </div>
 
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-icon purple"><i class="fa-solid fa-briefcase"></i></div>
-                    <div><span class="stat-value" id="stat-total">0</span><span class="stat-label">Jobs found</span></div>
+                    <div><span class="stat-value" id="stat-total">0</span><span class="stat-label">Jobs found</span>
+                    </div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon green"><i class="fa-solid fa-bullseye"></i></div>
-                    <div><span class="stat-value" id="stat-high">0</span><span class="stat-label">Strong matches (70%+)</span></div>
+                    <div><span class="stat-value" id="stat-high">0</span><span class="stat-label">Strong matches
+                            (70%+)</span></div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon cyan"><i class="fa-solid fa-passport"></i></div>
-                    <div><span class="stat-value" id="stat-visa">0</span><span class="stat-label">Sponsorship confirmed</span></div>
+                    <div><span class="stat-value" id="stat-visa">0</span><span class="stat-label">Visa confirmed</span>
+                    </div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon amber"><i class="fa-solid fa-paper-plane"></i></div>
-                    <div><span class="stat-value" id="stat-applied">0</span><span class="stat-label">Applied</span></div>
+                    <div><span class="stat-value" id="stat-applied">0</span><span class="stat-label">Applied</span>
+                    </div>
                 </div>
             </div>
 
             <div class="section-header">
-                <h2><i class="fa-solid fa-list-check"></i> Ranked jobs</h2>
+                <h2><i class="fa-solid fa-list-check"></i> Recommended Opportunities</h2>
                 <div class="filter-controls" id="job-filters">
                     <button class="filter-btn active" data-filter="all">All</button>
-                    <button class="filter-btn" data-filter="strong">70%+</button>
+                    <button class="filter-btn" data-filter="strong">70%+ Match</button>
+                    <button class="filter-btn" data-filter="location">My Locations</button>
                     <button class="filter-btn" data-filter="remote">Remote</button>
-                    <button class="filter-btn" data-filter="visa">Visa: yes</button>
+                    <button class="filter-btn" data-filter="visa">Visa Sponsored</button>
                 </div>
             </div>
             <div id="jobs-container" class="jobs-grid"></div>
         </section>
 
-        <!-- APPLICATIONS -->
+        <!-- 2. APPLICATIONS TAB -->
         <section id="applications-tab" class="tab-content">
+            <!-- Advanced Application Analytics Dashboard -->
+            <div class="card-panel" style="margin-bottom: 2rem; background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(17, 24, 39, 0.95) 100%); border: 1px solid var(--border-glow);">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-chart-line"></i> Application Funnel &amp; Analytics</h2>
+                    <p>Live metrics, shortlist conversion, and application activity insights.</p>
+                </div>
+                
+                <div class="stats-grid" style="margin-bottom: 1.5rem;">
+                    <div class="stat-card">
+                        <div class="stat-icon purple"><i class="fa-solid fa-paper-plane"></i></div>
+                        <div><span class="stat-value" id="analytics-total">0</span><span class="stat-label">Total Applied</span></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green"><i class="fa-solid fa-trophy"></i></div>
+                        <div><span class="stat-value" id="analytics-shortlisted">0</span><span class="stat-label">Shortlisted / Interviews</span></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan"><i class="fa-solid fa-percentage"></i></div>
+                        <div><span class="stat-value" id="analytics-rate">0%</span><span class="stat-label">Shortlist Rate</span></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon amber"><i class="fa-solid fa-file-signature"></i></div>
+                        <div><span class="stat-value" id="analytics-letters">0</span><span class="stat-label">Cover Letters Written</span></div>
+                    </div>
+                </div>
+
+                <div style="background: rgba(0, 0, 0, 0.3); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; font-weight: 600;">
+                        <span>Pipeline Stage Breakdown</span>
+                        <span id="pipeline-status-text">0 Active Applications</span>
+                    </div>
+                    <div class="progress-bar-container" style="height: 10px; background: var(--bg-card); border-radius: 5px; overflow: hidden; display: flex;">
+                        <div id="bar-applied" style="width: 0%; background: var(--accent-emerald);" title="Applied"></div>
+                        <div id="bar-interview" style="width: 0%; background: var(--accent-cyan);" title="Shortlisted / Interview"></div>
+                        <div id="bar-review" style="width: 0%; background: var(--accent-amber);" title="Needs Review"></div>
+                        <div id="bar-dismissed" style="width: 0%; background: var(--text-dim);" title="Dismissed"></div>
+                    </div>
+                    <div style="display: flex; gap: 1.5rem; margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
+                        <span><i class="fa-solid fa-circle" style="color: var(--accent-emerald);"></i> Applied (<span id="count-applied">0</span>)</span>
+                        <span><i class="fa-solid fa-circle" style="color: var(--accent-cyan);"></i> Shortlisted (<span id="count-interview">0</span>)</span>
+                        <span><i class="fa-solid fa-circle" style="color: var(--accent-amber);"></i> Needs Review (<span id="count-review">0</span>)</span>
+                        <span><i class="fa-solid fa-circle" style="color: var(--text-dim);"></i> Closed (<span id="count-dismissed">0</span>)</span>
+                    </div>
+                </div>
+            </div>
+
             <div class="card-panel">
                 <div class="panel-header">
-                    <h2><i class="fa-solid fa-shield-halved"></i> Application queue</h2>
-                    <p>The agent fills each form and stops. Check the screenshot and cover letter, then approve to submit. Forms with CAPTCHAs or unanswered required questions are handed back to you.</p>
+                    <h2><i class="fa-solid fa-list-check"></i> Application Management</h2>
+                    <p>Track job progress, review agent drafts, save required answers, and launch interview prep.</p>
                 </div>
                 <div id="applications-list" class="approval-list"></div>
             </div>
         </section>
 
-        <!-- PROFILE -->
+        <!-- 3. PREPARE TAB -->
+        <section id="prepare-tab" class="tab-content">
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-brain"></i> Interview Preparation Insights</h2>
+                    <p>AI-generated breakdown of skill gaps, key technical concepts to master, and behavioral questions
+                        for your target roles.</p>
+                </div>
+
+                <div
+                    style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center; background: var(--bg-card); padding: 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                    <label style="font-weight: 600; white-space: nowrap;"><i class="fa-solid fa-briefcase"></i> Select
+                        Application:</label>
+                    <select id="prepare-app-select"
+                        style="flex: 1; padding: 0.6rem 1rem; background: var(--bg-main); color: var(--text-main); border: 1px solid var(--border-color); border-radius: var(--radius-sm); outline: none;">
+                        <option value="">Choose an application to generate interview prep...</option>
+                    </select>
+                    <button id="btn-generate-prep" class="btn-primary"><i class="fa-solid fa-wand-magic-sparkles"></i>
+                        Generate Prep</button>
+                </div>
+
+                <div id="prep-insights-view">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-lightbulb"></i>
+                        <p>Select an application above or click "Prep Insights" on any applied job card to view
+                            customized interview preparation guidelines.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. NETWORK TAB -->
+        <section id="network-tab" class="tab-content">
+            <div class="card-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-users"></i> Company Insiders &amp; Referral Finder</h2>
+                    <p>Discover recruiters, hiring managers, and employees at target companies using web search and your
+                        LinkedIn profile.</p>
+                </div>
+
+                <form id="network-search-form" style="display: flex; gap: 1rem; margin-bottom: 2rem;">
+                    <div class="input-field" style="flex: 1;">
+                        <i class="fa-solid fa-building"></i>
+                        <input type="text" id="network-company-input"
+                            placeholder="Enter company name (e.g. Google, Stripe, Microsoft)" required>
+                    </div>
+                    <button type="submit" class="btn-primary"><i class="fa-solid fa-magnifying-glass"></i> Find
+                        Contacts</button>
+                </form>
+
+                <div id="network-results">
+                    <div class="empty-state">
+                        <i class="fa-solid fa-user-group"></i>
+                        <p>Enter a company name above to find recruiters, HR contacts, and engineers working at that
+                            company.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 5. PROFILE SETTINGS TAB -->
         <section id="profile-tab" class="tab-content">
+            <!-- Quick Upload Dropzone at top of Profile Settings -->
+            <div class="card-panel"
+                style="margin-bottom: 2rem; background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(6, 182, 212, 0.1) 100%); border: 1px solid var(--border-glow);">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-file-arrow-up"></i> Auto-Fill Profile from Resume</h2>
+                    <p>Upload your resume (PDF/DOCX/TXT) to instantly populate all your profile fields, skills, and
+                        experience details automatically.</p>
+                </div>
+                <label class="upload-dropzone" id="resume-dropzone">
+                    <input type="file" id="resume-input" accept=".pdf,.docx,.txt" hidden>
+                    <div class="cloud-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                    <strong>Drop your resume here to auto-fill Profile Settings</strong>
+                    <span class="muted">or click to browse files</span>
+                </label>
+                <p class="muted" id="resume-status" style="margin-top: 0.75rem; text-align: center;">No resume uploaded
+                    yet.</p>
+            </div>
+
             <div class="candidate-grid">
+                <!-- Profile details form -->
                 <div class="card-panel">
                     <div class="panel-header">
-                        <h2><i class="fa-solid fa-user-gear"></i> Your profile</h2>
-                        <p>Used to rank jobs and fill application forms. Nothing here is ever invented by the agent.</p>
+                        <h2><i class="fa-solid fa-user-gear"></i> Profile </h2>
+                        <p>Used to rank jobs, match skills, and automatically populate job application forms.</p>
                     </div>
                     <form id="profile-form" class="form-layout">
                         <div class="form-row">
-                            <div class="form-group"><label for="p-name">Full name *</label><input id="p-name" required></div>
-                            <div class="form-group"><label for="p-email">Email *</label><input id="p-email" type="email" required></div>
+                            <div class="form-group"><label for="p-name">Full Name *</label><input id="p-name" required>
+                            </div>
+                            <div class="form-group"><label for="p-email">Email Address *</label><input id="p-email"
+                                    type="email" required></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label for="p-phone">Phone</label><input id="p-phone" type="tel"></div>
-                            <div class="form-group"><label for="p-location">Location</label><input id="p-location" placeholder="City, Country"></div>
+                            <div class="form-group"><label for="p-phone">Phone Number</label><input id="p-phone"
+                                    type="tel"></div>
+                            <div class="form-group"><label for="p-location">Location</label><input id="p-location"
+                                    placeholder="City, Country"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label for="p-role">Current role</label><input id="p-role"></div>
-                            <div class="form-group"><label for="p-company">Current company</label><input id="p-company"></div>
+                            <div class="form-group"><label for="p-role">Current Title / Role</label><input id="p-role">
+                            </div>
+                            <div class="form-group"><label for="p-company">Current Company</label><input id="p-company">
+                            </div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label for="p-years">Years of experience</label><input id="p-years" type="number" step="0.5" min="0" max="60"></div>
-                            <div class="form-group"><label for="p-linkedin">LinkedIn URL</label><input id="p-linkedin" type="url"></div>
+                            <div class="form-group"><label for="p-years">Years of Experience</label><input id="p-years"
+                                    type="number" step="0.5" min="0" max="60"></div>
+                            <div class="form-group"><label for="p-linkedin"><i class="fa-brands fa-linkedin"></i>
+                                    LinkedIn Profile URL</label><input id="p-linkedin" type="url"
+                                    placeholder="https://www.linkedin.com/in/username"></div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label for="p-github">GitHub URL</label><input id="p-github" type="url"></div>
-                            <div class="form-group"><label for="p-portfolio">Portfolio URL</label><input id="p-portfolio" type="url"></div>
+                            <div class="form-group"><label for="p-github"><i class="fa-brands fa-github"></i> GitHub
+                                    URL</label><input id="p-github" type="url"
+                                    placeholder="https://github.com/username"></div>
+                            <div class="form-group"><label for="p-portfolio"><i class="fa-solid fa-globe"></i> Portfolio
+                                    URL</label><input id="p-portfolio" type="url"
+                                    placeholder="https://yourportfolio.com"></div>
                         </div>
-                        <div class="form-group"><label for="p-skills">Skills (comma separated)</label><textarea id="p-skills" rows="2"></textarea></div>
+                        <div class="form-group"><label for="p-skills">Core Skills (comma separated)</label><textarea
+                                id="p-skills" rows="2"></textarea></div>
 
-                        <h3 class="form-section">Job preferences</h3>
+                        <h3 class="form-section">Job Preferences</h3>
                         <div class="form-row">
-                            <div class="form-group"><label for="p-roles">Target roles</label><input id="p-roles" placeholder="AI Engineer, Backend Engineer"></div>
-                            <div class="form-group"><label for="p-locations">Preferred locations</label><input id="p-locations" placeholder="Bengaluru, Remote"></div>
+                            <div class="form-group"><label for="p-roles">Target Roles</label><input id="p-roles"
+                                    placeholder="AI Engineer, Backend Developer"></div>
+                            <div class="form-group"><label for="p-locations">Preferred Locations</label><input
+                                    id="p-locations" placeholder="Bengaluru, Remote, USA"></div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="p-remote">Work arrangement</label>
+                                <label for="p-remote">Work Arrangement</label>
                                 <select id="p-remote">
                                     <option value="ANY">Any</option>
                                     <option value="REMOTE_ONLY">Remote only</option>
@@ -170,7 +380,7 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="p-visa">Need visa sponsorship?</label>
+                                <label for="p-visa">Need Visa Sponsorship?</label>
                                 <select id="p-visa">
                                     <option value="false">No</option>
                                     <option value="true">Yes</option>
@@ -178,93 +388,83 @@
                             </div>
                         </div>
                         <div class="form-row">
-                            <div class="form-group"><label for="p-salary">Expected salary</label><input id="p-salary" placeholder="e.g. 30 LPA, or $140,000"></div>
-                            <div class="form-group"><label for="p-notice">Notice period / start date</label><input id="p-notice" placeholder="e.g. 30 days, or Immediately"></div>
+                            <div class="form-group"><label for="p-salary">Expected Salary</label><input id="p-salary"
+                                    placeholder="e.g. 30 LPA or $140,000"></div>
+                            <div class="form-group"><label for="p-notice">Notice Period</label><input id="p-notice"
+                                    placeholder="e.g. 30 days or Immediate"></div>
                         </div>
-                        <p class="muted small">Used only to answer those questions on application forms. Leave blank to answer them yourself.</p>
-                        <div class="form-group"><label for="p-blocked">Hidden companies (comma separated)</label>
-                            <input id="p-blocked" placeholder="Companies whose jobs you never want to see"></div>
+                        <div class="form-group"><label for="p-blocked">Hidden Companies (comma separated)</label>
+                            <input id="p-blocked" placeholder="Companies to hide from job searches">
+                        </div>
                         <label class="checkbox-row"><input type="checkbox" id="p-relocate"> Willing to relocate</label>
-                        <label class="checkbox-row" title="A PDF built from this profile, leading with the skills each posting asks for. Nothing is invented; you can download and check it on the application.">
-                            <input type="checkbox" id="p-tailor"> Attach a resume tailored to each job (instead of the uploaded one)</label>
-                        <button type="submit" class="btn-primary" id="btn-save-profile"><i class="fa-solid fa-floppy-disk"></i> Save profile</button>
+                        <label class="checkbox-row">
+                            <input type="checkbox" id="p-autopilot"> <strong>Full Auto-Pilot:</strong> Automatically
+                            apply to jobs with &ge;85% match (Limit 5 per cycle)
+                        </label>
+                        <label class="checkbox-row">
+                            <input type="checkbox" id="p-tailor"> Attach a tailored resume to applications
+                            automatically</label>
+                        <button type="submit" class="btn-primary" id="btn-save-profile"><i
+                                class="fa-solid fa-floppy-disk"></i> Save Profile Settings</button>
                     </form>
                 </div>
 
+                <!-- Detected Skills -->
                 <div class="card-panel">
                     <div class="panel-header">
-                        <h2><i class="fa-solid fa-file-arrow-up"></i> Resume</h2>
-                        <p>PDF, DOCX or TXT up to 10 MB. It is parsed into the profile and attached to applications.</p>
+                        <h2><i class="fa-solid fa-id-card"></i> Detected Profile Skills</h2>
+                        <p>Skills extracted from your resume used for candidate matching.</p>
                     </div>
-                    <label class="upload-dropzone" id="resume-dropzone">
-                        <input type="file" id="resume-input" accept=".pdf,.docx,.txt" hidden>
-                        <div class="cloud-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
-                        <strong>Drop your resume here</strong>
-                        <span class="muted">or click to choose a file</span>
-                    </label>
-                    <p class="muted" id="resume-status">No resume uploaded yet.</p>
+
                     <div class="resume-preview">
-                        <h4>Detected skills</h4>
                         <div class="resume-tags" id="skill-tags"></div>
                     </div>
                 </div>
             </div>
 
-            <div class="card-panel">
+            <!-- Saved Answers & System Management -->
+            <div class="card-panel" style="margin-top: 2rem;">
                 <div class="panel-header">
-                    <h2><i class="fa-solid fa-comments"></i> Saved answers</h2>
-                    <p>Answers to application questions ("How did you hear about us?", "Are you authorized to work in…?").
-                       The agent reuses them whenever a form asks the same question. Questions it cannot answer show up on the application for you to answer once.</p>
+                    <h2><i class="fa-solid fa-comments"></i> Saved Form Answers</h2>
+                    <p>Reused automatically on application forms when matching questions are detected.</p>
                 </div>
                 <form id="answer-form" class="answer-add">
-                    <input id="answer-question" placeholder="Question, as the form words it" required maxlength="500">
-                    <input id="answer-text" placeholder="Your answer" required maxlength="5000">
-                    <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add</button>
+                    <input id="answer-question" placeholder="Question pattern (e.g. Work Authorization)" required
+                        maxlength="500">
+                    <input id="answer-text" placeholder="Your standard answer" required maxlength="5000">
+                    <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Add Answer</button>
                 </form>
                 <div id="answer-list" class="answer-list"></div>
             </div>
-        </section>
 
-        <!-- SYSTEM -->
-        <section id="system-tab" class="tab-content">
-            <div class="card-panel">
+            <div class="card-panel" style="margin-top: 2rem;">
                 <div class="panel-header">
-                    <h2><i class="fa-solid fa-network-wired"></i> Service health</h2>
-                    <p>Refreshes every time you open this tab.</p>
+                    <h2><i class="fa-solid fa-server"></i> System Health &amp; Sources</h2>
+                    <p>Monitor status of microservices, watch custom ATS company job boards, and check inbox status.</p>
                 </div>
-                <div class="health-grid" id="health-grid"></div>
-            </div>
-            <div class="card-panel">
-                <div class="panel-header">
-                    <h2><i class="fa-solid fa-building"></i> Company watchlist</h2>
-                    <p>Companies whose whole job board is searched on every search, through their public job API.
-                       Paste any job or careers link from Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee or Personio.</p>
-                </div>
-                <form id="board-form" class="answer-add board-add">
-                    <input id="board-url" placeholder="https://jobs.lever.co/company" required maxlength="500">
-                    <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Watch company</button>
+
+                <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-network-wired"></i> Service Status</h4>
+                <div class="health-grid" id="health-grid" style="margin-bottom: 2rem;"></div>
+
+                <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-building"></i> Company Watchlist (ATS Direct
+                    Search)</h4>
+                <form id="board-form" class="answer-add board-add" style="margin-bottom: 1.5rem;">
+                    <input id="board-url" placeholder="Paste Lever, Greenhouse, Ashby or Workable URL" required
+                        maxlength="500">
+                    <button type="submit" class="btn-secondary"><i class="fa-solid fa-plus"></i> Watch Company</button>
                 </form>
-                <div id="board-list" class="board-list"></div>
-            </div>
-            <div class="card-panel">
-                <div class="panel-header">
-                    <h2><i class="fa-solid fa-envelope-open-text"></i> Job-alert inbox</h2>
-                    <p>Adds the jobs from your LinkedIn, Indeed and Naukri job-alert emails, and moves applications forward when a company replies
-                       ("received your application", interview invitations, rejections).</p>
-                </div>
-                <div id="inbox-status"></div>
-                <button type="button" class="btn-secondary" id="btn-check-inbox"><i class="fa-solid fa-envelope"></i> Check now</button>
-            </div>
-            <div class="card-panel">
-                <div class="panel-header">
-                    <h2><i class="fa-solid fa-broom"></i> Maintenance</h2>
-                    <p>Stored jobs are re-checked with their job board every few hours and closed postings are hidden. Run it now if you like.</p>
-                </div>
-                <button type="button" class="btn-secondary" id="btn-recheck"><i class="fa-solid fa-rotate"></i> Check for closed postings</button>
+                <div id="board-list" class="board-list" style="margin-bottom: 2rem;"></div>
+
+                <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-envelope-open-text"></i> Email Job Alerts
+                    &amp; Inbox</h4>
+                <div id="inbox-status" style="margin-bottom: 1rem;"></div>
+                <button type="button" class="btn-secondary" id="btn-check-inbox"><i class="fa-solid fa-envelope"></i>
+                    Check Inbox Now</button>
             </div>
         </section>
     </main>
 
+    <!-- Interactive Job Detail & Action Modal -->
     <div class="modal-overlay" id="modal" role="dialog" aria-modal="true">
         <div class="modal-card">
             <div class="modal-header">
@@ -279,4 +479,5 @@
 
     <script type="module" src="/static/js/app.js"></script>
 </body>
+
 </html>

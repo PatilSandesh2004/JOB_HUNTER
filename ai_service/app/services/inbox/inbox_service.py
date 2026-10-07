@@ -54,12 +54,14 @@ class InboxService:
         notifier: WebhookNotificationService | None = None,
         config: Settings = settings,
         transport: httpx.AsyncBaseTransport | None = None,
+        llm = None,
     ) -> None:
         self.session_factory = session_factory
         self.reader = reader
         self.notifier = notifier
         self.config = config
         self.transport = transport  # injectable for tests (tracking-link resolution)
+        self.llm = llm
         self.last_report: dict[str, Any] | None = None
 
     @property
@@ -153,7 +155,7 @@ class InboxService:
                         report["job_alerts"] += 1
                         session.add(_record(message, "job_alert", {"source": source, "jobs": len(found)}))
                         continue
-                    update = await self._status_update(session, message, apps)
+                    update = await self._status_update(session, message, apps, candidate)
                     if update:
                         report["status_updates"].append(update)
                     session.add(
@@ -191,7 +193,7 @@ class InboxService:
         ]
 
     async def _status_update(
-        self, session: AsyncSession, message: MailMessage, apps: list[ApplicationModel]
+        self, session: AsyncSession, message: MailMessage, apps: list[ApplicationModel], candidate
     ) -> dict[str, Any] | None:
         app = match_application(apps, message.sender, message.subject)
         if app is None:
@@ -204,13 +206,26 @@ class InboxService:
         new = next_status(current, classified.status)
         if new is None:
             return None
+            
+        sender = message.sender.split("<")[0].strip(' "') or message.sender
+        events = [timeline_event(f"Email: {new.value.replace('_', ' ').title()}", f"{sender}: {message.subject}")]
+        
+        if new == ApplicationStatus.INTERVIEW and self.llm:
+            try:
+                system_prompt = "You draft polite, professional replies to recruiters for interview requests. Keep it very concise (3-4 sentences max). Use placeholders like [Insert Date/Time] for availability. Return only the email body."
+                user_prompt = f"Draft a reply to this email from {app.company} scheduling an interview.\nCandidate Name: {candidate.name}\nRecruiter Email:\nSubject: {message.subject}\n\n{message.text[:1000]}"
+                draft = await self.llm.complete(system_prompt, user_prompt)
+                if draft:
+                    events.append(timeline_event("Drafted Interview Reply", f"Copy and use this draft:\n\n{draft.strip()}"))
+            except Exception as e:
+                logger.warning(f"Failed to draft reply: {e}")
+
         changes: dict[str, Any] = {"status": new.value}
         if new == ApplicationStatus.APPLIED and app.applied_at is None:
             changes["applied_at"] = message.received_at or datetime.now(UTC)
-        sender = message.sender.split("<")[0].strip(' "') or message.sender
         await ApplicationRepository(session).update(
             app,
-            events=[timeline_event(f"Email: {new.value.replace('_', ' ').title()}", f"{sender}: {message.subject}")],
+            events=events,
             **changes,
         )
         return {

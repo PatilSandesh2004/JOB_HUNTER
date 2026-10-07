@@ -10,6 +10,7 @@ import logging
 import re
 from collections import Counter
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
 
 from langgraph.graph import END, START, StateGraph
 
@@ -24,14 +25,19 @@ from ai_service.app.services.jobs.deduplication_service import JobDeduplicationS
 from ai_service.app.services.jobs.enrichment_service import JobEnrichmentService
 from ai_service.app.services.jobs.location_service import CITIES, LocationFit, LocationMatcher
 from ai_service.app.services.jobs.normalization_service import JobNormalizationService
-from ai_service.app.services.matching.matching_engine import MatchingEngineService, role_similarity
+from ai_service.app.services.matching.matching_engine import (
+    MatchingEngineService,
+    experience_band,
+    role_similarity,
+    title_seniority_conflict,
+)
 from ai_service.app.services.search.search_service import SearchService
 
 logger = logging.getLogger("jobpilot.search_agent")
 
-MAX_QUERIES = 7
+MAX_QUERIES = 9
 MAX_LLM_QUERIES = 3
-RELEVANCE_THRESHOLD = 40.0  # role_similarity below this to every target title = unrelated job
+RELEVANCE_THRESHOLD = 55.0  # role_similarity below this to every target title = unrelated job
 
 _EXPANSION_SYSTEM = "You are a recruiter who writes precise job-board search queries. Respond with a JSON object only."
 _EXPANSION_USER = """Write {n} web search queries to find open job postings for this candidate.
@@ -40,13 +46,13 @@ Candidate:
 - Target roles: {roles}
 - Current role: {current_role}
 - Years of experience: {years}
+- Experience range the user wants: {band}
 - Recent titles: {titles}
 - Strongest skills: {skills}
 - Locations: {locations}
 
 Return JSON {{"titles": [...], "queries": [...]}}:
-- "titles": up to 6 real job titles this candidate should apply for, based on their roles, experience
-  and skills (e.g. "Machine Learning Engineer", "Backend Engineer (Python)"). No seniority words.
+- "titles": up to 6 real job titles this candidate should apply for, closely aligned with their target roles and experience (e.g. "Machine Learning Engineer", "Backend Engineer (Python)"). Do not invent unrelated roles. No seniority words.
 - "queries": {n} web search queries, each "<job title> <location>", max 7 words, matching the
   candidate's seniority (e.g. "Senior Python Backend Engineer Bengaluru"), always including one of the
   candidate's locations, no site: operators, no quotes, no boolean words."""
@@ -101,22 +107,70 @@ def resolve_targets(request: SearchQueryRequest, candidate: CandidateProfile | N
     return roles[:4], locations[:4]
 
 
-def build_base_queries(roles: list[str], locations: list[str], remote_only: bool = False) -> list[str]:
+def build_base_queries(
+    roles: list[str],
+    locations: list[str],
+    remote_only: bool = False,
+    experience: str = "ANY",
+    posted_within: str = "any",
+) -> list[str]:
     queries = []
+    exp_suffix = ""
+    if experience and experience != "ANY":
+        exp_suffix = f" {experience} years" if "-" in experience else (" senior" if "+" in experience else f" {experience}")
+
     for role in roles:
         for location in locations or [""]:
             if location.lower() == "remote":
-                queries.append(f"{role} remote")
+                queries.append(f"{role}{exp_suffix} remote".strip())
             else:
                 suffix = " remote" if remote_only else ""
-                queries.append(f"{role} {location}{suffix}".strip())
+                queries.append(f"{role}{exp_suffix} {location}{suffix}".strip())
     # Search engines index both spellings of renamed Indian cities (Bengaluru/Bangalore).
     for location in locations:
         aliases = next((a for a, _ in CITIES.values() if location.lower() in a), ())
         for alias in aliases[:2]:
             if alias != location.lower() and roles:
-                queries.append(f"{roles[0]} {alias.title()}")
+                queries.append(f"{roles[0]}{exp_suffix} {alias.title()}".strip())
     return list(dict.fromkeys(queries))
+
+
+def effective_experience(request, candidate: CandidateProfile | None) -> str:
+    """The experience range to search by: the user's choice, else +-2 years around the resume's."""
+    chosen = getattr(request, "experience", "ANY") or "ANY"
+    years = candidate.years_of_experience if candidate else 0
+    if chosen == "ANY" and years:
+        return f"{max(0, years - 1):g}-{years + 1.5:g}"
+    return chosen
+
+
+def build_resume_queries(
+    roles: list[str],
+    locations: list[str],
+    candidate: CandidateProfile | None,
+    experience: str = "ANY",
+) -> list[str]:
+    """Queries that blend what the user typed with the resume: top skills and seniority."""
+    if candidate is None or not roles:
+        return []
+    role = roles[0]
+    role_words = set(re.findall(r"[a-z0-9+#.]+", role.lower()))
+    skills = [s for s in candidate.skills if s.lower() not in role_words and len(s) <= 20][:2]
+    place = locations[0] if locations and locations[0].lower() != "remote" else ("remote" if locations else "")
+    queries = []
+    if skills:
+        queries.append(f"{role} {' '.join(skills)} {place}".strip())
+    band = experience_band(experience)
+    years = band[0] if band else (candidate.years_of_experience or 0)
+    if not _SENIORITY_WORDS.search(role):
+        if years >= 6:
+            queries.append(f"Senior {role} {place}".strip())
+        elif 0 < years <= 2:
+            queries.append(f"Junior {role} {place}".strip())
+    return queries
+
+
+_SENIORITY_WORDS = re.compile(r"\b(senior|sr|junior|jr|lead|principal|staff|intern)\b", re.I)
 
 
 class SearchAgent:
@@ -196,25 +250,34 @@ class SearchAgent:
     # ---- nodes -----------------------------------------------------------
     async def plan_queries(self, state: SearchAgentState) -> dict:
         request, roles, locations = state["request"], state["roles"], state["locations"]
-        base = build_base_queries(roles, locations, request.remote_only)
+        base = build_base_queries(
+            roles,
+            locations,
+            request.remote_only,
+            getattr(request, "experience", "ANY"),
+            getattr(request, "posted_within", "any"),
+        )
         llm_titles: list[str] = []
         llm_queries: list[str] = []
         errors: list[str] = []
         if request.use_llm_expansion and self.llm.available:
             try:
-                llm_titles, llm_queries = await self._llm_plan(roles, locations, state.get("candidate"))
+                llm_titles, llm_queries = await self._llm_plan(roles, locations, state.get("candidate"), request)
             except LLMUnavailableError as exc:
                 errors.append(f"Query expansion skipped: {exc}")
-        # Interleave so both typed roles and resume-derived titles survive the cap.
+        resume_queries = build_resume_queries(
+            roles, locations, state.get("candidate"), effective_experience(request, state.get("candidate"))
+        )
+        # Interleave typed-role queries, resume-derived queries and LLM queries so each survives the cap.
         merged: list[str] = []
-        for i in range(max(len(base), len(llm_queries))):
-            merged += [q for q in (base[i : i + 1] + llm_queries[i : i + 1])]
+        for i in range(max(len(base), len(llm_queries), len(resume_queries))):
+            merged += base[i : i + 1] + resume_queries[i : i + 1] + llm_queries[i : i + 1]
         queries = list(dict.fromkeys(q for q in merged if q))
         titles = list(dict.fromkeys([*roles, *llm_titles]))
         return {"queries": queries[:MAX_QUERIES], "titles": titles, "errors": errors}
 
     async def _llm_plan(
-        self, roles: list[str], locations: list[str], candidate: CandidateProfile | None
+        self, roles: list[str], locations: list[str], candidate: CandidateProfile | None, request: SearchQueryRequest | None = None
     ) -> tuple[list[str], list[str]]:
         """Related job titles and search queries derived from the resume."""
         data = await self.llm.complete_json(
@@ -226,6 +289,7 @@ class SearchAgent:
                 years=f"{candidate.years_of_experience:g}"
                 if candidate and candidate.years_of_experience
                 else "not stated",
+                band=effective_experience(request, candidate) if request else "ANY",
                 titles=", ".join(w.title for w in (candidate.work_experience if candidate else [])[:3]) or "not stated",
                 skills=", ".join((candidate.skills if candidate else [])[:12]) or "not stated",
                 locations=", ".join(locations) or "any",
@@ -260,6 +324,26 @@ class SearchAgent:
         removed["unrelated role"] += len(jobs) - len(kept)
         jobs = kept
 
+        # Experience: drop jobs whose title seniority or stated years clearly contradict the chosen range.
+        candidate = state.get("candidate")
+        cand_years = candidate.years_of_experience if candidate else None
+        band = experience_band(effective_experience(request, candidate))
+        if band is not None or cand_years is not None:
+            low, high = band if band is not None else (0, None)
+            ceiling = low if high is None else high
+            kept = []
+            for j in jobs:
+                req = j.experience_required
+                if title_seniority_conflict(j.title, band, cand_years):
+                    removed["seniority mismatch"] += 1
+                elif req is not None and req > ceiling + 0.5:
+                    removed["needs more experience"] += 1
+                elif req is not None and low >= 2 and 0 < req < low - 2:
+                    removed["too junior"] += 1
+                else:
+                    kept.append(j)
+            jobs = kept
+
         candidate = state.get("candidate")
         blocked = {c.strip().lower() for c in (candidate.preferences.blocked_companies if candidate else []) if c}
         if blocked:
@@ -275,6 +359,49 @@ class SearchAgent:
             kept = [j for j in jobs if j.visa_sponsorship.status != VisaSponsorshipStatus.NO]
             removed["no sponsorship"] += len(jobs) - len(kept)
             jobs = kept
+            
+        # Visa strictness: If job is in a different country from candidate's location, require visa sponsorship
+        if candidate and candidate.location:
+            from ai_service.app.services.jobs.location_service import LocationMatcher
+            user_matcher = LocationMatcher.from_preferences([candidate.location])
+            if user_matcher.countries:
+                kept = []
+                for j in jobs:
+                    if j.location:
+                        job_matcher = LocationMatcher.from_preferences([j.location])
+                        if job_matcher.countries and not (job_matcher.countries & user_matcher.countries):
+                            # It's a foreign country. Only keep if visa_sponsorship is YES or UNKNOWN (if we want to be permissive, but user said 'compy whoch they gonna provide the visa'). Let's filter out NO.
+                            if j.visa_sponsorship.status == VisaSponsorshipStatus.NO:
+                                removed["foreign no sponsorship"] += 1
+                                continue
+                    kept.append(j)
+                jobs = kept
+
+        posted_within = getattr(request, "posted_within", "any") or "any"
+        if posted_within != "any":
+            now = datetime.now(timezone.utc)
+            cutoff = None
+            if posted_within == "24h":
+                cutoff = now - timedelta(hours=24)
+            elif posted_within == "7d":
+                cutoff = now - timedelta(days=7)
+            elif posted_within == "30d":
+                cutoff = now - timedelta(days=30)
+
+            if cutoff:
+                kept = []
+                for j in jobs:
+                    if j.posted_at is None:
+                        kept.append(j)
+                    else:
+                        dt = j.posted_at
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if dt >= cutoff:
+                            kept.append(j)
+                        else:
+                            removed[f"posted > {posted_within}"] += 1
+                jobs = kept
 
         matcher = LocationMatcher.from_preferences(locations)
         if request.strict_location and matcher.active:
@@ -292,6 +419,9 @@ class SearchAgent:
         candidate = state.get("candidate")
         results = state["results"]
         if candidate is not None:
-            results = [JobWithMatch(job=r.job, match=self.matcher.evaluate_match(candidate, r.job)) for r in results]
+            wanted = effective_experience(state["request"], candidate)
+            results = [
+                JobWithMatch(job=r.job, match=self.matcher.evaluate_match(candidate, r.job, wanted)) for r in results
+            ]
             results.sort(key=lambda r: (r.match.passed_hard_filters, r.match.overall_match), reverse=True)
         return {"results": results[: state["request"].max_results]}

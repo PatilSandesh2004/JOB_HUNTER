@@ -1,23 +1,23 @@
-// Application queue: review, edit, approve, and track outcomes.
+// Application queue: review, edit, approve, track outcomes and interview prep.
 import { AWAITING, IN_FLIGHT, NEEDS_REVIEW, SUBMITTED } from '../state.js';
 import { esc, safeUrl, timeAgo } from '../utils.js';
 import { manualButton, statusLabel } from './jobFeed.js';
 
 const GROUPS = [
-    { title: 'Did you apply?', icon: 'fa-circle-question', test: (a) => a.status === AWAITING },
-    { title: 'Needs your review', icon: 'fa-hand', test: (a) => NEEDS_REVIEW.has(a.status) },
-    { title: 'Agent working', icon: 'fa-robot', test: (a) => IN_FLIGHT.has(a.status) },
-    { title: 'Applied', icon: 'fa-circle-check', test: (a) => SUBMITTED.has(a.status) },
-    { title: 'Dismissed', icon: 'fa-box-archive', test: (a) => a.status === 'DISMISSED' },
+    { title: 'Shortlisted / Interviewing', icon: 'fa-trophy', test: (a) => a.status === 'INTERVIEW' },
+    { title: 'Applied Roles', icon: 'fa-circle-check', test: (a) => SUBMITTED.has(a.status) && a.status !== 'INTERVIEW' },
+    { title: 'Needs Your Review', icon: 'fa-hand', test: (a) => NEEDS_REVIEW.has(a.status) },
+    { title: 'Agent Working', icon: 'fa-robot', test: (a) => IN_FLIGHT.has(a.status) },
+    { title: 'Visited / Not Applied', icon: 'fa-eye', test: (a) => a.status === AWAITING },
+    { title: 'Dismissed / Closed', icon: 'fa-box-archive', test: (a) => a.status === 'DISMISSED' || a.status === 'REJECTED' },
 ];
 
 export function renderApplications(container, applications) {
     if (!applications.length) {
         container.innerHTML = `<div class="empty-state"><i class="fa-solid fa-inbox"></i>
-            <p>No applications yet. Use "Prepare application" on a job.</p></div>`;
+            <p>No applications yet. Apply to jobs to track your progress here.</p></div>`;
         return;
     }
-    // Keep unsaved cover-letter edits and typed answers across re-renders (polling refreshes this list).
     const drafts = new Map([...container.querySelectorAll('textarea[data-app-id]')]
         .filter((t) => t.dataset.dirty === '1').map((t) => [t.dataset.appId, t.value]));
     const answerDrafts = new Map([...container.querySelectorAll('[data-question-input]')]
@@ -27,7 +27,7 @@ export function renderApplications(container, applications) {
     container.innerHTML = GROUPS.map((group) => {
         const items = applications.filter(group.test);
         if (!items.length) return '';
-        return `<h3 class="group-title"><i class="fa-solid ${group.icon}"></i> ${group.title} <span class="muted">(${items.length})</span></h3>
+        return `<h3 class="group-title" style="margin-top:1.5rem; margin-bottom:0.75rem;"><i class="fa-solid ${group.icon}"></i> ${group.title} <span class="muted">(${items.length})</span></h3>
                 ${items.map((a) => applicationCard(a, drafts.get(a.id), answerDrafts, openTimelines.has(a.id))).join('')}`;
     }).join('');
 
@@ -45,7 +45,7 @@ function applicationCard(app, draft, answerDrafts, timelineOpen) {
     const reviewable = NEEDS_REVIEW.has(app.status);
     const filled = Object.entries(app.filled_fields || {});
     const statusText = busy
-        ? `<i class="fa-solid fa-circle-notch fa-spin"></i> ${app.status === 'SUBMITTING' ? 'Submitting…' : 'Preparing cover letter and filling the form…'}`
+        ? `<i class="fa-solid fa-circle-notch fa-spin"></i> ${app.status === 'SUBMITTING' ? 'Submitting…' : 'Preparing cover letter and filling form…'}`
         : esc(statusLabel(app.status));
 
     return `
@@ -57,7 +57,7 @@ function applicationCard(app, draft, answerDrafts, timelineOpen) {
                    <span class="tag subtle">${esc({ auto: 'auto-apply', manual: 'manual', review: 'agent-filled' }[app.mode] || app.mode)}</span>
                    <span class="muted">updated ${esc(timeAgo(app.updated_at))}</span></p>
             </div>
-            <div class="app-actions">${actions(app, reviewable)}</div>
+            <div class="app-actions" style="display:flex; gap:0.5rem; align-items:center;">${actions(app, reviewable)}</div>
         </div>
         ${app.error ? `<p class="notice ${app.status === 'FAILED' ? 'error' : 'warn'}"><i class="fa-solid fa-circle-info"></i> ${esc(app.error)}</p>` : ''}
         ${app.confirmation ? `<p class="notice ok"><i class="fa-solid fa-check"></i> ${esc(app.confirmation)}</p>` : ''}
@@ -72,7 +72,6 @@ function applicationCard(app, draft, answerDrafts, timelineOpen) {
     </div>`;
 }
 
-/** Required questions the agent could not answer, prefilled with AI drafts to check. */
 function questions(app, answerDrafts) {
     if (!app.questions?.length) return '';
     const fields = app.questions.map((q) => {
@@ -100,22 +99,20 @@ function questions(app, answerDrafts) {
     </div>`;
 }
 
-/** How the profile matches the posting's skills, plus the tailored resume when one was attached. */
 function resumeReport(app) {
     const report = app.resume_report;
     if (!report && !app.has_tailored_resume) return '';
     const matched = (report?.matched_skills || []).map((s) => `<span class="chip ok">${esc(s)}</span>`).join('');
-    const missing = (report?.missing_skills || []).map((s) => `<span class="chip missing" title="The posting asks for it; it is not in your profile">${esc(s)}</span>`).join('');
+    const missing = (report?.missing_skills || []).map((s) => `<span class="chip missing" title="Posting asks for it; not in profile">${esc(s)}</span>`).join('');
     const pdf = app.has_tailored_resume
         ? `<button class="btn-secondary btn-sm" data-action="open-resume" data-app-id="${esc(app.id)}"><i class="fa-solid fa-file-pdf"></i> Tailored resume</button>`
         : '';
     if (!matched && !missing && !pdf) return '';
     return `<div class="chip-row resume-report">${pdf}
         ${matched ? `<span class="muted">Posting skills you have:</span> ${matched}` : ''}
-        ${missing ? `<span class="muted">Not in your profile:</span> ${missing}` : ''}</div>`;
+        ${missing ? `<span class="muted">Not in profile:</span> ${missing}` : ''}</div>`;
 }
 
-/** Everything the agent did, oldest first, with screenshots per step. */
 function timeline(app, open) {
     if (!app.events?.length) return '';
     const rows = app.events.map((e) => `
@@ -153,7 +150,6 @@ function actions(app, reviewable) {
     }
     if (reviewable) {
         const label = app.status === 'PENDING_APPROVAL' ? 'Approve & submit' : 'Retry submit';
-        // When the agent got stuck (no form, CAPTCHA, login), applying yourself is the main path.
         if (app.status === 'PENDING_APPROVAL') {
             buttons.push(`<button class="btn-primary btn-sm" data-action="approve" data-app-id="${esc(app.id)}"><i class="fa-solid fa-paper-plane"></i> ${label}</button>`);
         }
@@ -164,8 +160,12 @@ function actions(app, reviewable) {
         buttons.push(`<button class="btn-ghost btn-sm" data-action="set-status" data-status="DISMISSED" data-app-id="${esc(app.id)}">Dismiss</button>`);
     }
     if (app.status === 'APPLIED') {
-        buttons.push(`<button class="btn-secondary btn-sm" data-action="set-status" data-status="INTERVIEW" data-app-id="${esc(app.id)}">Got interview</button>`);
+        buttons.push(`<button class="btn-primary btn-sm" data-action="get-insights" data-app-id="${esc(app.id)}" data-company="${esc(app.company)}"><i class="fa-solid fa-brain"></i> Prepare for Interview</button>`);
+        buttons.push(`<button class="btn-secondary btn-sm" data-action="set-status" data-status="INTERVIEW" data-app-id="${esc(app.id)}"><i class="fa-solid fa-trophy"></i> Shortlisted</button>`);
         buttons.push(`<button class="btn-ghost btn-sm" data-action="set-status" data-status="REJECTED" data-app-id="${esc(app.id)}">Rejected</button>`);
+    } else if (app.status === 'INTERVIEW') {
+        buttons.push(`<span class="tag visa" style="background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan); font-weight:700; border: 1px solid var(--accent-cyan);"><i class="fa-solid fa-trophy"></i> Shortlisted</span>`);
+        buttons.push(`<button class="btn-primary btn-sm" data-action="get-insights" data-app-id="${esc(app.id)}" data-company="${esc(app.company)}"><i class="fa-solid fa-brain"></i> Prepare for Interview</button>`);
     }
     return buttons.join('');
 }

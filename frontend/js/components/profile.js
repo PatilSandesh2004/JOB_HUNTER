@@ -23,6 +23,7 @@ export function fillProfileForm(profile) {
     $('p-visa').value = String(Boolean(prefs.visa_sponsorship_required));
     $('p-relocate').checked = Boolean(prefs.willing_to_relocate);
     $('p-tailor').checked = Boolean(prefs.tailor_resume);
+    $('p-autopilot').checked = Boolean(prefs.auto_apply_high_matches);
     $('p-blocked').value = (prefs.blocked_companies || []).join(', ');
     $('p-salary').value = prefs.expected_salary || '';
     $('p-notice').value = prefs.notice_period || '';
@@ -58,6 +59,7 @@ export function readProfileForm(existing) {
             visa_sponsorship_required: $('p-visa').value === 'true',
             willing_to_relocate: $('p-relocate').checked,
             tailor_resume: $('p-tailor').checked,
+            auto_apply_high_matches: $('p-autopilot').checked,
             blocked_companies: splitList($('p-blocked').value),
             expected_salary: $('p-salary').value.trim() || null,
             notice_period: $('p-notice').value.trim() || null,

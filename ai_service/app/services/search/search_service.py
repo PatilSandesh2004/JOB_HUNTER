@@ -11,6 +11,7 @@ import httpx
 
 from ai_service.app.core.config import Settings, settings
 from ai_service.app.integrations.search.searxng_client import SearXNGClient
+from ai_service.app.integrations.search.serper_client import SerperClient
 from ai_service.app.schemas.search import RawJobPosting
 from ai_service.app.services.jobs.ats import ATS_SEARCH_SITES, detect_ats
 
@@ -42,12 +43,19 @@ class SearchService:
 
     def __init__(
         self,
-        searxng_client: SearXNGClient | None = None,
+        searxng_client: SearXNGClient | SerperClient | None = None,
         config: Settings = settings,
         board_source: "BoardSearchSource | None" = None,
     ) -> None:
         self.config = config
-        self.searxng = searxng_client or SearXNGClient(config.searxng_url, config.searxng_timeout_seconds)
+        
+        if searxng_client:
+            self.searxng = searxng_client
+        elif config.web_search_provider.lower() == "serper":
+            self.searxng = SerperClient(config.serper_api_key, config.searxng_timeout_seconds)
+        else:
+            self.searxng = SearXNGClient(config.searxng_url, config.searxng_timeout_seconds)
+            
         self.boards = board_source
         self._searxng_limit = asyncio.Semaphore(config.searxng_max_concurrency)
 
@@ -56,7 +64,7 @@ class SearchService:
     ) -> tuple[list[RawJobPosting], list[str]]:
         """Run every query against every enabled source concurrently. Returns (postings, errors)."""
         errors: list[str] = []
-        async with httpx.AsyncClient(timeout=self.config.external_api_timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=self.config.external_api_timeout_seconds, verify=False) as client:
             tasks = [self._searxng_query(q, client) for q in self._expand_ats_queries(queries)]
             if self.config.search_enable_remotive:
                 tasks += [self._remotive(role, client) for role in titles[:3]]
@@ -84,8 +92,15 @@ class SearchService:
             # Site-scoped variants only for the leading queries, to stay under engine rate limits.
             leading = queries[: self.MAX_ATS_TARGETED_QUERIES]
             expanded += [f"{q} site:{site}" for q in leading for site in ATS_SEARCH_SITES]
-        # Job sites (LinkedIn, Naukri, Indeed): read from search results only; the sites are never scraped.
-        expanded += [f"{q} site:{site}" for q in queries[:1] for site in self.config.search_job_sites]
+        # Job sites: group them to avoid generating dozens of web requests which deplete quotas.
+        job_sites = self.config.search_job_sites
+        if job_sites:
+            chunk_size = 5
+            for i in range(0, len(job_sites), chunk_size):
+                chunk = job_sites[i:i + chunk_size]
+                site_group = " OR ".join(f"site:{site}" for site in chunk)
+                for q in queries[:1]:
+                    expanded.append(f"{q} ({site_group})")
         return list(dict.fromkeys(expanded))
 
     async def _searxng_query(self, query: str, client: httpx.AsyncClient) -> list[RawJobPosting]:
@@ -107,7 +122,7 @@ class SearchService:
                     url=url,
                     snippet=strip_html(item.get("content")),
                     source="searxng",
-                    engine=item.get("engine"),
+                    engine=item.get("engine") or "serper",
                     posted_at=_parse_datetime(item.get("publishedDate")),
                 )
             )
