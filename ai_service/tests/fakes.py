@@ -68,8 +68,9 @@ class FakeSearchService:
         self.errors = errors or []
         self.calls: list[list[str]] = []
 
-    async def search_many(self, queries, titles, locations=None):
+    async def search_many(self, queries, titles, locations=None, **options):
         self.calls.append(queries)
+        self.options = options
         return list(self.postings), list(self.errors)
 
 

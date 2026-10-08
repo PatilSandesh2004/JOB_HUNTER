@@ -20,10 +20,16 @@ class SearXNGClient:
         *,
         page: int = 1,
         language: str = "en",
+        time_range: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> list[dict[str, Any]]:
-        """Return result dicts. Raises SearXNGError when nothing came back because engines are blocked."""
-        params = {"q": query, "format": "json", "pageno": page, "language": language}
+        """Return result dicts. Raises SearXNGError when nothing came back because engines are blocked.
+
+        `time_range` (day | week | month | year) limits results to recent pages on engines that support it.
+        """
+        params: dict[str, Any] = {"q": query, "format": "json", "pageno": page, "language": language}
+        if time_range:
+            params["time_range"] = time_range
         if client is not None:
             return await self._request(client, params)
         async with httpx.AsyncClient(timeout=self.timeout) as own_client:

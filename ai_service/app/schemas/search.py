@@ -41,6 +41,15 @@ class RawJobPosting(BaseModel):
     engine: str | None = None
     posted_at: datetime | None = None
     verified: bool = False  # details confirmed via the ATS's own API
+    # Set by company-board sources: the ATS board ("greenhouse:acme") and job id, for jobs whose URL is the
+    # company's own careers site, so their details can still be fetched from the ATS's API.
+    board: str | None = None
+    board_job_id: str | None = None
+    # Structured pay when the source states it (otherwise parsed from the text)
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
 
 
 class SearchResponse(BaseModel):

@@ -3,16 +3,19 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_service.app.api.deps import get_application_service
+from ai_service.app.api.deps import get_application_service, get_insights_service, get_interview_coach
 from ai_service.app.core.config import settings
 from ai_service.app.database.session import get_db
 from ai_service.app.repositories.application_repository import ApplicationRepository, to_schema
 from ai_service.app.schemas.application import ApplicationCreate, ApplicationRead, ApplicationStatus
 from ai_service.app.services.applications.application_service import ApplicationService
-from ai_service.app.api.deps import get_insights_service
+from ai_service.app.services.applications.insights_service import ApplicationInsightsService
+from ai_service.app.services.applications.interview_coach import InterviewCoach
+from ai_service.app.services.applications.report_service import progress_report, report_email
+from ai_service.app.services.notifications.email_service import EmailService
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -30,6 +33,23 @@ async def list_applications(
     return [to_schema(row) for row in await ApplicationRepository(db).list_all(status_filter)]
 
 
+@router.get("/report")
+async def application_report(days: int = Query(7, ge=1, le=365), db: AsyncSession = Depends(get_db)) -> dict:
+    """Progress over the last `days`: applications sent, interviews, offers, rejections, rates by kind of role."""
+    return await progress_report(db, days)
+
+
+@router.post("/report/email")
+async def email_application_report(
+    days: int = Query(7, ge=1, le=365), db: AsyncSession = Depends(get_db)
+) -> dict[str, bool]:
+    """Email the progress report now (needs SMTP settings)."""
+    email = EmailService()
+    if not email.configured:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email is not set up: add SMTP_HOST and SMTP_USER to .env")
+    return {"sent": await email.send(*report_email(await progress_report(db, days)))}
+
+
 @router.post("", response_model=ApplicationRead, status_code=status.HTTP_202_ACCEPTED)
 async def create_application(
     payload: ApplicationCreate,
@@ -41,6 +61,7 @@ async def create_application(
     - `review`: draft a cover letter and pre-fill the form; you approve before it is submitted.
     - `auto`: same, but submit when the form is complete and has no CAPTCHA.
     - `manual`: you apply on the company site; it waits in "Did you apply?" and a letter is drafted for you.
+    - `save`: bookmark the job to apply later. Applying later (any mode) starts from the saved entry.
     """
     return await service.create(db, payload)
 
@@ -63,17 +84,50 @@ async def update_application(
     """Edit the cover letter, or record an outcome (APPLIED / INTERVIEW / REJECTED / DISMISSED)."""
     return await service.update(db, application_id, patch.cover_letter, patch.status)
 
+
 @router.get("/{application_id}/insights")
 async def get_application_insights(
     application_id: str,
     db: AsyncSession = Depends(get_db),
-    service = Depends(get_insights_service)
+    service: ApplicationInsightsService = Depends(get_insights_service),
+) -> dict:
+    """Interview preparation: skill gaps, topics to revise and likely behavioural questions."""
+    return await service.generate(db, application_id)
+
+
+class InterviewMessage(BaseModel):
+    role: str = Field(pattern="^(interviewer|candidate)$")
+    content: str = Field(max_length=4000)
+
+
+class InterviewTurn(BaseModel):
+    messages: list[InterviewMessage] = Field(default_factory=list, max_length=60)
+
+
+@router.post("/{application_id}/mock-interview")
+async def mock_interview(
+    application_id: str,
+    body: InterviewTurn,
+    db: AsyncSession = Depends(get_db),
+    coach: InterviewCoach = Depends(get_interview_coach),
+) -> dict:
+    """One turn of a mock interview: send the conversation so far, get feedback and the next question."""
+    return await coach.turn(db, application_id, [m.model_dump() for m in body.messages])
+
+
+class FollowUp(BaseModel):
+    note: str = ""
+
+
+@router.post("/{application_id}/follow-up", response_model=ApplicationRead)
+async def follow_up_application(
+    application_id: str,
+    body: FollowUp | None = None,
+    db: AsyncSession = Depends(get_db),
+    service: ApplicationService = Depends(get_application_service),
 ):
-    """Generate interview preparation insights."""
-    try:
-        return await service.generate_insights(application_id, db)
-    except ValueError as e:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+    """Record that you followed up with the company; the follow-up reminder starts again."""
+    return await service.follow_up(db, application_id, (body.note if body else "").strip()[:500])
 
 
 @router.post("/{application_id}/approve", response_model=ApplicationRead, status_code=status.HTTP_202_ACCEPTED)

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ApplicationStatus(StrEnum):
+    SAVED = "SAVED"  # bookmarked to apply later
     PROCESSING = "PROCESSING"  # agent is preparing materials / filling the form
     PENDING_APPROVAL = "PENDING_APPROVAL"  # form filled (not submitted); waiting for the user
     SUBMITTING = "SUBMITTING"
@@ -15,6 +16,7 @@ class ApplicationStatus(StrEnum):
     FAILED = "FAILED"
     DISMISSED = "DISMISSED"  # user declined
     INTERVIEW = "INTERVIEW"
+    OFFER = "OFFER"
     REJECTED = "REJECTED"  # employer declined
 
 
@@ -22,6 +24,7 @@ class ApplyMode(StrEnum):
     REVIEW = "review"  # agent fills the form, you approve before it submits
     AUTO = "auto"  # agent submits when the form is complete and has no CAPTCHA
     MANUAL = "manual"  # you apply on the company site; JobPilot tracks it and drafts a cover letter
+    SAVE = "save"  # bookmark the job to apply later; nothing is filled or drafted yet
 
 
 class ApplicationCreate(BaseModel):
@@ -88,5 +91,6 @@ class ApplicationRead(BaseModel):
     questions: list[ScreeningQuestion] = Field(default_factory=list)
     has_tailored_resume: bool = False
     resume_report: ResumeReport | None = None
+    follow_up_due: bool = Field(default=False, description="Applied a while ago with no news: time to follow up")
     created_at: datetime
     updated_at: datetime

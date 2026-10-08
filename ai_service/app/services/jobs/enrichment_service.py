@@ -6,14 +6,15 @@ workplace type and full description, and a 404 tells us the posting has closed.
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
+from ai_service.app.core.http import tls_verify
+from ai_service.app.core.text import parse_datetime, strip_html
 from ai_service.app.schemas.search import RawJobPosting
 from ai_service.app.services.jobs.ats import AtsInfo, detect_ats, slug_to_company
-from ai_service.app.services.search.search_service import strip_html
+from ai_service.app.services.search.board_source import ashby_salary, lever_salary
 
 logger = logging.getLogger("jobpilot.enrichment")
 
@@ -45,7 +46,7 @@ class JobEnrichmentService:
         """Return (postings with verified details, number of closed postings dropped)."""
         ashby_boards: dict[str, asyncio.Task] = {}
         async with httpx.AsyncClient(
-            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport, verify=False
+            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport, verify=tls_verify()
         ) as client:
             outcomes = await asyncio.gather(*(self._enrich_one(p, client, ashby_boards) for p in postings))
         kept = [p for p in outcomes if p is not None]
@@ -56,7 +57,7 @@ class JobEnrichmentService:
         postings = [RawJobPosting(title="", url=url, source="recheck") for url in urls]
         ashby_boards: dict[str, asyncio.Task] = {}
         async with httpx.AsyncClient(
-            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport, verify=False
+            timeout=self.timeout, headers={"Accept": "application/json"}, transport=self.transport, verify=tls_verify()
         ) as client:
             outcomes = await asyncio.gather(*(self._enrich_one(p, client, ashby_boards) for p in postings))
         return [False if o is None else (True if o.verified else None) for o in outcomes]
@@ -65,13 +66,19 @@ class JobEnrichmentService:
         self, posting: RawJobPosting, client: httpx.AsyncClient, ashby_boards: dict[str, asyncio.Task]
     ) -> RawJobPosting | None:
         info = detect_ats(posting.url)
+        if info.name == "other" and posting.board and posting.board_job_id:
+            # A company careers-site link for a job listed on an ATS board: ask the ATS's API.
+            ats, _, slug = posting.board.partition(":")
+            info = AtsInfo(ats, slug, posting.board_job_id, True)
         fetcher = {
             "greenhouse": self._greenhouse,
             "lever": self._lever,
             "ashby": self._ashby,
             "workable": self._workable,
+            "smartrecruiters": self._smartrecruiters,
         }.get(info.name)
-        if fetcher is None or not info.is_posting or posting.verified:
+        # Board listings without a description (SmartRecruiters) are fetched too, to read their skills.
+        if fetcher is None or not info.is_posting or (posting.verified and posting.snippet):
             return posting
         try:
             async with self._limit:
@@ -105,7 +112,7 @@ class JobEnrichmentService:
             "location": location,
             "workplace": _workplace_from_text(location),
             "snippet": strip_html(data.get("content"), DESCRIPTION_LIMIT),
-            "posted_at": _parse_dt(data.get("first_published") or data.get("updated_at")),
+            "posted_at": parse_datetime(data.get("first_published") or data.get("updated_at")),
         }
 
     async def _lever(self, info: AtsInfo, client: httpx.AsyncClient, _: dict) -> dict:
@@ -122,7 +129,8 @@ class JobEnrichmentService:
             "snippet": f"{data.get('descriptionPlain', '')} {sections} {data.get('additionalPlain', '')}"[
                 :DESCRIPTION_LIMIT
             ],
-            "posted_at": _parse_dt(data.get("createdAt")),
+            "posted_at": parse_datetime(data.get("createdAt")),
+            **lever_salary(data),
         }
 
     async def _ashby(self, info: AtsInfo, client: httpx.AsyncClient, boards: dict[str, asyncio.Task]) -> dict:
@@ -130,7 +138,7 @@ class JobEnrichmentService:
         slug = info.company_slug or ""
         if slug not in boards:
             boards[slug] = asyncio.ensure_future(
-                self._get_json(client, f"https://api.ashbyhq.com/posting-api/job-board/{slug}")
+                self._get_json(client, f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true")
             )
         board = await boards[slug]
         job = next((j for j in board.get("jobs", []) if j.get("id") == info.job_id), None)
@@ -149,7 +157,8 @@ class JobEnrichmentService:
             ),
             "workplace": workplace,
             "snippet": (job.get("descriptionPlain") or "")[:DESCRIPTION_LIMIT],
-            "posted_at": _parse_dt(job.get("publishedAt")),
+            "posted_at": parse_datetime(job.get("publishedAt")),
+            **ashby_salary(job),
         }
 
     async def _workable(self, info: AtsInfo, client: httpx.AsyncClient, _: dict) -> dict:
@@ -167,7 +176,27 @@ class JobEnrichmentService:
             "location": location,
             "workplace": workplace,
             "snippet": strip_html(f"{data.get('description', '')} {data.get('requirements', '')}", DESCRIPTION_LIMIT),
-            "posted_at": _parse_dt(data.get("published")),
+            "posted_at": parse_datetime(data.get("published")),
+        }
+
+    async def _smartrecruiters(self, info: AtsInfo, client: httpx.AsyncClient, _: dict) -> dict:
+        data = await self._get_json(
+            client, f"https://api.smartrecruiters.com/v1/companies/{info.company_slug}/postings/{info.job_id}"
+        )
+        sections = ((data.get("jobAd") or {}).get("sections")) or {}
+        # The company blurb is left out: it describes the employer, not what the job asks for.
+        parts = [
+            (sections.get(key) or {}).get("text")
+            for key in ("jobDescription", "qualifications", "additionalInformation")
+        ]
+        location = data.get("location") or {}
+        return {
+            "title": data.get("name"),
+            "company": (data.get("company") or {}).get("name"),
+            "location": location.get("fullLocation") or _join(location.get("city"), location.get("country")),
+            "workplace": "REMOTE" if location.get("remote") else ("HYBRID" if location.get("hybrid") else None),
+            "snippet": strip_html(" ".join(p for p in parts if p), DESCRIPTION_LIMIT),
+            "posted_at": parse_datetime(data.get("releasedDate")),
         }
 
 
@@ -183,15 +212,3 @@ def _workplace_from_text(text: str | None) -> str | None:
     if "remote" in lowered:
         return "REMOTE"
     return None
-
-
-def _parse_dt(value: Any) -> datetime | None:
-    if value in (None, ""):
-        return None
-    try:
-        if isinstance(value, int | float):
-            return datetime.fromtimestamp(value / 1000 if value > 1e11 else value, tz=UTC)
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-    except (ValueError, OSError):
-        return None

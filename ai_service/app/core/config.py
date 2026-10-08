@@ -48,22 +48,25 @@ class Settings(BaseSettings):
     searxng_timeout_seconds: float = 20.0
     searxng_max_concurrency: int = 4
     search_ats_targeting: bool = True
+    # Public job feeds (cached; see services/search/feeds.py)
     search_enable_remotive: bool = True
     search_enable_arbeitnow: bool = True
-    # Job sites searched through SearXNG (site: queries for the leading query only, to limit engine load).
-    # Their postings are listed as "Apply manually": applying there needs your own login. [] disables.
-    search_job_sites: list[str] = Field(default_factory=lambda: [
-        "linkedin.com/jobs/view", "naukri.com", "in.indeed.com",
-        "foundit.in", "cutshort.io", "instahyre.com", "hirist.tech",
-        "hirect.in", "shine.com", "timesjobs.com", "freshersworld.com",
-        "glassdoor.co.in", "wellfound.com", "ycombinator.com", "workatastartup.com",
-        "startup.jobs", "weworkremotely.com", "remoteok.com", "remotive.com",
-        "himalayas.app", "remote.co", "workingnomads.com", "jobgether.com",
-        "arc.dev", "turing.com", "toptal.com", "flexjobs.com", "remotejobs.co",
-        "ai-jobs.net", "aijobs.ai", "datasciencejobs.com", "kaggle.com",
-        "huggingface.co", "mljobs.com"
-    ])
+    search_enable_remoteok: bool = True
+    search_enable_himalayas: bool = True
+    search_enable_jobicy: bool = True
+    # Adzuna job search API (free key at developer.adzuna.com; covers India, with salaries). Empty: off.
+    adzuna_app_id: str = ""
+    adzuna_app_key: str = ""
+    # Job sites searched through SearXNG (one site: query each, for the leading query only, to limit engine
+    # load). Only sites whose single-job links are recognised are useful (see services/jobs/ats.py); their
+    # postings are "Apply manually" because applying there needs your own login. [] disables.
+    search_job_sites: list[str] = Field(default_factory=lambda: ["linkedin.com/jobs/view", "naukri.com", "indeed.com"])
     external_api_timeout_seconds: float = 10.0
+    # HTTPS certificate checks. The operating system's trust store is used as well as Mozilla's, so company
+    # proxies with their own root certificate work. CA_BUNDLE points at an extra PEM file if needed.
+    # TLS_VERIFY=false turns checking off entirely (insecure: anyone on the network can read the traffic).
+    tls_verify: bool = True
+    ca_bundle: str = ""
 
     # LLM (Groq)
     groq_api_key: str = ""
@@ -72,6 +75,12 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.4
     llm_max_tokens: int = 2048
     llm_query_expansion: bool = True
+    # AI review of the best matches of each search (verdict + reason per job, cached). 0 turns it off.
+    llm_review_top_n: int = 20
+
+    # Resume-to-description similarity with a local embedding model (downloaded once into data/models)
+    semantic_matching: bool = True
+    semantic_model: str = "BAAI/bge-small-en-v1.5"
 
     # Browser automation
     browser_headless: bool = True
@@ -104,16 +113,26 @@ class Settings(BaseSettings):
     # Run your profile's search automatically every N hours (0 = off)
     discovery_interval_hours: float = 0.0
 
-    # Matching & notifications
+    # Matching & notifications (each strong match is announced once)
     high_match_threshold: float = 85.0
     notification_webhook_url: str = ""
-    
-    # Email Alerts (SMTP)
+
+    # Email alerts (SMTP). Sent to ALERT_EMAIL_TO, or to SMTP_USER when that is empty.
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from_email: str = "alerts@jobpilot.local"
+    alert_email_to: str = ""
+
+    # Full Auto-Pilot (profile setting): at most this many automatic applications per day
+    auto_apply_daily_limit: int = 5
+
+    # Applications: suggest a follow-up after this many days without news (0 = never)
+    follow_up_days: int = 7
+    # Email digests (need SMTP): new strong matches every N hours, and a weekly progress report
+    alert_digest_hours: float = 0.0
+    weekly_report_email: bool = False
 
     @property
     def inbox_enabled(self) -> bool:

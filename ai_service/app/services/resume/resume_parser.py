@@ -40,7 +40,9 @@ name, email, phone, location, current_role, current_company, summary (<=2 senten
 years_of_experience (number, total professional experience), linkedin_url, github_url, portfolio_url,
 skills (list of strings),
 work_experience (list of {{company, title, location, start_date, end_date, description}}),
-education (list of {{institution, degree, field_of_study, graduation_year}}).
+education (list of {{institution, degree, field_of_study, graduation_year}}),
+target_roles (up to 4 job titles this person is a strong fit for now, given their actual experience, most
+fitting first, no seniority words, e.g. "AI Engineer", "Backend Engineer (Python)").
 
 Resume:
 \"\"\"
@@ -224,6 +226,9 @@ def _merge(base: CandidateProfile, llm_data: dict) -> CandidateProfile:
     merged["skills"] = normalize_skill_list([*merged["skills"], *llm_skills])[:60]
     merged["work_experience"] = _valid_items(llm_data.get("work_experience"), WorkExperience)
     merged["education"] = _valid_items(llm_data.get("education"), EducationItem)
+    roles = [r.strip() for r in llm_data.get("target_roles") or [] if isinstance(r, str) and 2 <= len(r.strip()) <= 60]
+    if roles:
+        merged["preferences"]["preferred_roles"] = list(dict.fromkeys(roles))[:4]
     try:
         return CandidateProfile.model_validate(merged)
     except ValidationError:

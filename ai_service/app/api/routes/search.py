@@ -12,7 +12,8 @@ from ai_service.app.database.session import AsyncSessionLocal, get_db
 from ai_service.app.repositories.candidate_repository import CandidateRepository
 from ai_service.app.repositories.job_repository import JobRepository
 from ai_service.app.schemas.search import SearchProgress, SearchQueryRequest, SearchResponse
-from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
+from ai_service.app.services.matching.feedback import FeedbackModel
+from ai_service.app.services.notifications.alerts import MatchAlertService
 
 logger = logging.getLogger("jobpilot.search")
 
@@ -24,15 +25,15 @@ async def search_jobs(
     request: SearchQueryRequest,
     db: AsyncSession = Depends(get_db),
     agent: SearchAgent = Depends(get_search_agent),
-    notifier: WebhookNotificationService = Depends(get_notifier),
+    notifier: MatchAlertService = Depends(get_notifier),
 ) -> SearchResponse:
     """Discover, normalise, de-duplicate and rank jobs against the active profile, then persist them."""
     candidate = await CandidateRepository(db).get_active()
-    response = await agent.run(request, candidate)
+    response = await agent.run(request, candidate, await FeedbackModel.load(db))
     repo = JobRepository(db)
     await repo.upsert_many(response.results, checked=True)
     _drop_hidden(response, await repo.hidden_ids([r.job.id for r in response.results]))
-    await notifier.notify_high_matches(response.results)
+    await notifier.notify_new(db, response.results)
     return response
 
 
@@ -40,7 +41,7 @@ async def search_jobs(
 async def search_jobs_stream(
     request: SearchQueryRequest,
     agent: SearchAgent = Depends(get_search_agent),
-    notifier: WebhookNotificationService = Depends(get_notifier),
+    notifier: MatchAlertService = Depends(get_notifier),
 ) -> StreamingResponse:
     """Same as `POST /search`, streamed as Server-Sent Events.
 
@@ -49,7 +50,8 @@ async def search_jobs_stream(
     """
     async with AsyncSessionLocal() as session:
         candidate = await CandidateRepository(session).get_active()
-    state = agent.initial_state(request, candidate)  # invalid input -> 400 before the stream starts
+        feedback = await FeedbackModel.load(session)
+    state = agent.initial_state(request, candidate, feedback)  # invalid input -> 400 before the stream starts
 
     async def events() -> AsyncIterator[str]:
         try:
@@ -61,7 +63,7 @@ async def search_jobs_stream(
                     repo = JobRepository(session)
                     await repo.upsert_many(item.results, checked=True)
                     _drop_hidden(item, await repo.hidden_ids([r.job.id for r in item.results]))
-                await notifier.notify_high_matches(item.results)
+                    await notifier.notify_new(session, item.results)
                 yield _sse("result", item.model_dump_json())
         except Exception as exc:
             logger.exception("Streamed search failed")

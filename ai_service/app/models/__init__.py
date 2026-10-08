@@ -3,7 +3,19 @@ from ai_service.app.models.candidate import CandidateModel
 from ai_service.app.models.connection import ConnectionModel
 from ai_service.app.models.inbox_message import InboxMessageModel
 from ai_service.app.models.job import JobModel
+from ai_service.app.models.resume_variant import ResumeVariantModel
+from ai_service.app.models.saved_search import SavedSearchModel
 from ai_service.app.models.screening_answer import ScreeningAnswerModel
 from ai_service.app.models.task import TaskModel
 
-__all__ = ["ApplicationModel", "CandidateModel", "ConnectionModel", "InboxMessageModel", "JobModel", "ScreeningAnswerModel", "TaskModel"]
+__all__ = [
+    "ApplicationModel",
+    "CandidateModel",
+    "ConnectionModel",
+    "InboxMessageModel",
+    "JobModel",
+    "ResumeVariantModel",
+    "SavedSearchModel",
+    "ScreeningAnswerModel",
+    "TaskModel",
+]

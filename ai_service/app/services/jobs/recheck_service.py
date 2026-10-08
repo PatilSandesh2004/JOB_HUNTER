@@ -13,7 +13,7 @@ from ai_service.app.services.jobs.enrichment_service import JobEnrichmentService
 logger = logging.getLogger("jobpilot.recheck")
 
 # ATSs whose public API tells us whether a posting still exists (see JobEnrichmentService).
-VERIFIABLE_ATS = ("greenhouse", "lever", "ashby", "workable")
+VERIFIABLE_ATS = ("greenhouse", "lever", "ashby", "workable", "smartrecruiters")
 
 
 class JobRecheckService:

@@ -57,7 +57,15 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
 ```
 
 This opens two windows: the AI service (port 8000) and the web gateway (port 8090).
-The first start upgrades your database automatically; your existing data is kept.
+The first start upgrades your database automatically; your existing data is kept. It also downloads the
+resume-similarity model (about 65 MB) into `data\models` in the background; searches work meanwhile.
+
+> **Updating an existing install?** Install the new dependencies first, then start as usual:
+> ```powershell
+> .venv\Scripts\python -m pip install -r requirements.txt
+> ```
+> After the first start, open **Profile Settings** and click **Save Profile Settings** once: your stored
+> jobs are re-scored with the new matching.
 
 Open **http://localhost:8090**.
 
@@ -104,16 +112,22 @@ Docker uses its own PostgreSQL database, separate from the local SQLite one in `
 
 ## First use
 
-1. **Profile** tab: drop your resume (PDF/DOCX/TXT). Check the fields, set target roles and locations, then **Save profile**.
-2. Optional, on the same tab: add saved answers ("How did you hear about us?" etc.) and tick **Attach a resume tailored to each job**.
-3. **Discover** tab: type roles and locations, or click **From my resume**. Progress shows live.
-4. On a job: **Prepare** (agent fills the form, you review), **Auto-apply**, or **Apply manually**.
-5. **Applications** tab: answer any open questions, check the screenshot and letter, then **Approve & submit**.
+1. **Profile Settings** tab: drop your resume (PDF/DOCX/TXT). With a Groq key, target roles are suggested
+   from it. Check the fields, set target roles and locations, then **Save Profile Settings**.
+2. Optional, on the same tab: add **resume versions** (e.g. "AI" and "Backend"; the best one is attached
+   to each application), saved form answers ("How did you hear about us?" etc.), and your company watchlist.
+3. **Jobs** tab: type roles and locations, or leave the role empty to search from your resume. Progress
+   shows live. Use the sort and filter bar above the results; **Save search** runs it on a schedule.
+4. On a job: **Save** (bookmark icon), **Resume check**, **Contacts**, **Prepare** (agent fills the
+   form, you review), **Auto-apply**, or **Apply manually**.
+5. **Applications** tab: answer any open questions, check the screenshot and letter, then **Approve &
+   submit**. Switch to **Board** to move applications from Saved to Offer; follow-ups are flagged.
+6. **Prepare** tab: interview insights and a five-question **mock interview** for any application.
 
 If the page asks for an **access token**, enter the `API_TOKEN` from your `.env`.
 
-On any job card: the **eye icon** hides a job you're not interested in, and the **ban icon** hides
-every job from that company (undo from the toast, or in Profile → Hidden companies).
+On any job card: the **eye icon** hides a job you're not interested in (similar jobs then rank lower), and
+the **ban icon** hides every job from that company (undo from the toast, or in Profile → Hidden companies).
 
 ---
 
@@ -136,7 +150,15 @@ That company's whole job board is searched from then on.
 4. Restart JobPilot. The System tab → **Job-alert inbox** shows the status; click **Check now** or wait
    (it checks every 30 minutes). Replies from companies you applied to also update those applications.
 
-**Automatic searches**: set `DISCOVERY_INTERVAL_HOURS=6` in `.env` to run your profile's search every 6 hours.
+**Automatic searches**: press **Save search** on the Jobs tab (choose how often it runs), or set
+`DISCOVERY_INTERVAL_HOURS=6` in `.env` to run your profile's search every 6 hours.
+
+**More jobs from Adzuna** (covers India, includes salaries): get a free key at developer.adzuna.com and set
+`ADZUNA_APP_ID` and `ADZUNA_APP_KEY` in `.env`.
+
+**Email alerts and reports**: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` (Gmail: an app
+password) and optionally `ALERT_EMAIL_TO`. Strong new matches are emailed once each;
+`ALERT_DIGEST_HOURS=24` adds a daily digest and `WEEKLY_REPORT_EMAIL=true` a weekly progress report.
 
 ---
 
@@ -163,5 +185,8 @@ cd backend; go test ./...; cd ..                   # Go gateway tests
 | Inbox: "Login failed … app password" | Use a Gmail **app password**, not your normal password (needs 2-step verification). |
 | Inbox finds alerts but 0 jobs | Alert layouts change; check the alerts are from LinkedIn/Indeed/Naukri and contain job links. Open an issue with the email's layout. |
 | "Watch company" says the link isn't supported | Only Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee and Personio boards can be watched. |
+| Searches fail with certificate (SSL) errors at work | Your company proxy uses its own certificate. Install it in Windows, or set `CA_BUNDLE=C:\path\to\proxy-ca.pem`. `TLS_VERIFY=false` works but is insecure. |
+| System tab: Resume similarity DOWN / unavailable | The model could not be downloaded (no internet or blocked). Matching still works without it; restart once you are online. |
+| First search after starting is slow | The company boards (~60 MB) are downloaded once and cached for 3 hours. |
 
 More detail (features, API, configuration): see [DOCUMENTATION.md](DOCUMENTATION.md).

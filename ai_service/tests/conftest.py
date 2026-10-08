@@ -12,6 +12,7 @@ os.environ.update(
         "GROQ_API_KEY": "",  # tests never call the real LLM
         "NOTIFICATION_WEBHOOK_URL": "",
         "BROWSER_HEADLESS": "true",
+        "SEMANTIC_MATCHING": "false",  # no model download in tests
     }
 )
 
@@ -27,6 +28,8 @@ from ai_service.app.main import app  # noqa: E402
 from ai_service.app.schemas.candidate import CandidatePreferences, CandidateProfile  # noqa: E402
 from ai_service.app.services.applications.application_service import ApplicationService  # noqa: E402
 from ai_service.app.services.applications.tailoring_service import ApplicationTailoringService  # noqa: E402
+from ai_service.app.services.resume.library import ResumeLibrary  # noqa: E402
+from ai_service.app.services.resume.resume_parser import ResumeParserService  # noqa: E402
 from ai_service.app.services.tasks.runner import TaskRunner  # noqa: E402
 from ai_service.tests.fakes import (  # noqa: E402
     FakePdfRenderer,
@@ -55,6 +58,7 @@ async def client():
         AsyncSessionLocal,
         lambda: ApplicationAgent(ApplicationTailoringService(llm), filler=filler, pdf_renderer=renderer),
         suggester=suggester,
+        resume_library=ResumeLibrary(ResumeParserService(llm)),
     )
     app.dependency_overrides[deps.get_search_agent] = lambda: SearchAgent(FakeSearchService(), llm)
     app.dependency_overrides[deps.get_application_service] = lambda: service

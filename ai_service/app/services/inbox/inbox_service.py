@@ -14,8 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ai_service.app.core.config import Settings, settings
-from ai_service.app.core.errors import JobPilotError
+from ai_service.app.core.errors import JobPilotError, LLMUnavailableError
+from ai_service.app.core.http import tls_verify
 from ai_service.app.core.timeline import timeline_event
+from ai_service.app.integrations.llm.llm_client import LLMClient
 from ai_service.app.integrations.mail.imap_reader import MailError, MailMessage, WantFn
 from ai_service.app.models.application import ApplicationModel
 from ai_service.app.models.inbox_message import InboxMessageModel
@@ -32,10 +34,15 @@ from ai_service.app.services.inbox.status_updates import TRACKED, match_applicat
 from ai_service.app.services.jobs.deduplication_service import JobDeduplicationService
 from ai_service.app.services.jobs.normalization_service import JobNormalizationService
 from ai_service.app.services.matching.matching_engine import MatchingEngineService
-from ai_service.app.services.notifications.webhook_service import WebhookNotificationService
+from ai_service.app.services.notifications.alerts import MatchAlertService
 from ai_service.app.services.search.search_service import strip_html
 
 logger = logging.getLogger("jobpilot.inbox")
+
+_REPLY_SYSTEM = (
+    "You draft polite, professional replies to recruiters who invite a candidate to interview. Keep it to 3-4 "
+    "sentences. Use placeholders like [your available times] instead of inventing dates. Return only the email body."
+)
 
 
 class InboxNotConfiguredError(JobPilotError):
@@ -51,10 +58,10 @@ class InboxService:
         self,
         session_factory: async_sessionmaker[AsyncSession],
         reader: MailReader | None,
-        notifier: WebhookNotificationService | None = None,
+        notifier: MatchAlertService | None = None,
         config: Settings = settings,
         transport: httpx.AsyncBaseTransport | None = None,
-        llm = None,
+        llm: LLMClient | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.reader = reader
@@ -142,7 +149,7 @@ class InboxService:
             report["messages"] = len(messages)
 
             postings: list[RawJobPosting] = []
-            async with httpx.AsyncClient(timeout=10, transport=self.transport) as client:
+            async with httpx.AsyncClient(timeout=10, transport=self.transport, verify=tls_verify()) as client:
                 resolver = client if self.config.inbox_resolve_tracking_links else None
                 for message in messages:
                     if message.key in known:
@@ -206,19 +213,13 @@ class InboxService:
         new = next_status(current, classified.status)
         if new is None:
             return None
-            
+
         sender = message.sender.split("<")[0].strip(' "') or message.sender
         events = [timeline_event(f"Email: {new.value.replace('_', ' ').title()}", f"{sender}: {message.subject}")]
-        
-        if new == ApplicationStatus.INTERVIEW and self.llm:
-            try:
-                system_prompt = "You draft polite, professional replies to recruiters for interview requests. Keep it very concise (3-4 sentences max). Use placeholders like [Insert Date/Time] for availability. Return only the email body."
-                user_prompt = f"Draft a reply to this email from {app.company} scheduling an interview.\nCandidate Name: {candidate.name}\nRecruiter Email:\nSubject: {message.subject}\n\n{message.text[:1000]}"
-                draft = await self.llm.complete(system_prompt, user_prompt)
-                if draft:
-                    events.append(timeline_event("Drafted Interview Reply", f"Copy and use this draft:\n\n{draft.strip()}"))
-            except Exception as e:
-                logger.warning(f"Failed to draft reply: {e}")
+        if new == ApplicationStatus.INTERVIEW:
+            draft = await self._draft_interview_reply(app.company, candidate, message)
+            if draft:
+                events.append(timeline_event("Drafted a reply to the interview invitation", draft))
 
         changes: dict[str, Any] = {"status": new.value}
         if new == ApplicationStatus.APPLIED and app.applied_at is None:
@@ -236,6 +237,23 @@ class InboxService:
             "to": new.value,
             "phrase": classified.matched_phrase,
         }
+
+    async def _draft_interview_reply(self, company: str, candidate, message: MailMessage) -> str | None:
+        """A short reply to an interview invitation for you to edit and send (never sent automatically)."""
+        if self.llm is None or not self.llm.available:
+            return None
+        body = (message.text or strip_html(message.html, 4000))[:1500]
+        prompt = (
+            f"Draft a reply to this interview invitation from {company}.\n"
+            f"Candidate name: {candidate.name if candidate and candidate.name else 'the candidate'}\n"
+            f"Subject: {message.subject}\n\n{body}"
+        )
+        try:
+            draft = await self.llm.complete(_REPLY_SYSTEM, prompt, temperature=0.4, max_tokens=600)
+        except LLMUnavailableError as exc:
+            logger.warning("Could not draft an interview reply: %s", exc)
+            return None
+        return draft.strip() or None
 
     async def _store(self, session: AsyncSession, postings: list[RawJobPosting], candidate) -> tuple[int, int]:
         """Score and save jobs that are not stored yet (an alert never overwrites richer search data)."""
@@ -255,7 +273,7 @@ class InboxService:
         ]
         await JobRepository(session).upsert_many(new)
         if self.notifier is not None and new:
-            await self.notifier.notify_high_matches(new)
+            await self.notifier.notify_new(session, new)
         return len(jobs), len(new)
 
 

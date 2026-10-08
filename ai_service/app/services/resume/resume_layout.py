@@ -14,19 +14,70 @@ from pathlib import Path
 logger = logging.getLogger("jobpilot.resume_layout")
 
 _KNOWN = {
-    "summary": {"summary", "professional summary", "profile", "professional profile", "objective",
-                "career objective", "about me", "about", "executive summary"},
-    "skills": {"skills", "technical skills", "key skills", "core competencies", "core skills",
-               "skills & tools", "skills and tools", "technologies", "tech stack"},
-    "experience": {"experience", "work experience", "professional experience", "employment history",
-                   "work history", "employment", "career history", "internships", "internship experience"},
-    "education": {"education", "academic background", "education & training", "academics",
-                  "academic qualifications", "qualifications"},
+    "summary": {
+        "summary",
+        "professional summary",
+        "profile",
+        "professional profile",
+        "objective",
+        "career objective",
+        "about me",
+        "about",
+        "executive summary",
+    },
+    "skills": {
+        "skills",
+        "technical skills",
+        "key skills",
+        "core competencies",
+        "core skills",
+        "skills & tools",
+        "skills and tools",
+        "technologies",
+        "tech stack",
+    },
+    "experience": {
+        "experience",
+        "work experience",
+        "professional experience",
+        "employment history",
+        "work history",
+        "employment",
+        "career history",
+        "internships",
+        "internship experience",
+    },
+    "education": {
+        "education",
+        "academic background",
+        "education & training",
+        "academics",
+        "academic qualifications",
+        "qualifications",
+    },
 }
-_EXTRA = {"projects", "personal projects", "academic projects", "certifications", "certificates",
-          "achievements", "awards", "honors", "publications", "languages", "interests", "hobbies",
-          "volunteering", "volunteer experience", "extracurricular activities", "courses", "training",
-          "additional information", "references", "positions of responsibility"}
+_EXTRA = {
+    "projects",
+    "personal projects",
+    "academic projects",
+    "certifications",
+    "certificates",
+    "achievements",
+    "awards",
+    "honors",
+    "publications",
+    "languages",
+    "interests",
+    "hobbies",
+    "volunteering",
+    "volunteer experience",
+    "extracurricular activities",
+    "courses",
+    "training",
+    "additional information",
+    "references",
+    "positions of responsibility",
+}
 _SERIF = re.compile(r"times|georgia|garamond|cambria|serif|palatino|book|minion|century|charter", re.I)
 _SUBSET_PREFIX = re.compile(r"^[A-Z]{6}\+")
 _STYLE_SUFFIX = re.compile(r"[-,](bold|italic|oblique|regular|bolditalic|light|medium|semibold|mt|ps|psmt)+.*$", re.I)
@@ -173,7 +224,8 @@ def _from_pdf(path: Path) -> ResumeLayout | None:
             sections.append(current)
 
         rules = [
-            r for r in [*page.lines, *page.rects]
+            r
+            for r in [*page.lines, *page.rects]
             if (r["x1"] - r["x0"]) > page.width * 0.4 and (r["bottom"] - r["top"]) < 2.5
         ]
         layout.heading_rule = bool(rules)

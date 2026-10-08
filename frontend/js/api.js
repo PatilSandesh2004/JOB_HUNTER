@@ -137,6 +137,16 @@ export const api = {
     getInsiders: (id) => request(`/jobs/${encodeURIComponent(id)}/insiders`),
     getCompanyContacts: (company) => request(`/jobs/company-contacts?company=${encodeURIComponent(company)}`),
     generateOutreach: (data) => request('/jobs/outreach-message', { method: 'POST', body: data }),
+    resumeCheck: (id, variantId = null) =>
+        request(`/jobs/${encodeURIComponent(id)}/resume-check${variantId ? `?variant_id=${encodeURIComponent(variantId)}` : ''}`),
+
+    // Saved searches: run on a schedule and alert you to strong new matches.
+    listSavedSearches: () => request('/saved-searches'),
+    saveSearch: (name, params, intervalHours) =>
+        request('/saved-searches', { method: 'POST', body: { name, request: params, interval_hours: intervalHours } }),
+    updateSavedSearch: (id, patch) => request(`/saved-searches/${id}`, { method: 'PATCH', body: patch }),
+    deleteSavedSearch: (id) => request(`/saved-searches/${id}`, { method: 'DELETE' }),
+    runSavedSearch: (id) => request(`/saved-searches/${id}/run`, { method: 'POST' }),
 
     // Company job boards searched directly (watchlist), and the job-alert inbox.
     listBoards: () => request('/boards'),
@@ -152,6 +162,15 @@ export const api = {
         form.append('file', file);
         return request('/candidates/me/resume', { method: 'POST', form });
     },
+    listResumes: () => request('/candidates/me/resumes'),
+    addResumeVersion: (file, label) => {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('label', label);
+        return request('/candidates/me/resumes', { method: 'POST', form });
+    },
+    deleteResumeVersion: (id) => request(`/candidates/me/resumes/${id}`, { method: 'DELETE' }),
+    connectionsSummary: () => request('/candidates/me/connections'),
     uploadConnections: (file) => {
         const form = new FormData();
         form.append('file', file);
@@ -159,7 +178,7 @@ export const api = {
     },
 
     listApplications: () => request('/applications'),
-    // mode: 'review' (agent fills, you approve) | 'auto' (agent submits) | 'manual' (you apply on the site)
+    // mode: 'review' (agent fills, you approve) | 'auto' (agent submits) | 'manual' (you apply on the site) | 'save
     createApplication: (jobId, mode = 'review', tailorResume = null) =>
         request('/applications', { method: 'POST', body: { job_id: jobId, mode, tailor_resume: tailorResume } }),
     updateApplication: (id, patch) => request(`/applications/${id}`, { method: 'PATCH', body: patch }),
@@ -169,6 +188,10 @@ export const api = {
     stepScreenshotUrl: (id, name) => blobUrl(`/applications/${id}/screenshots/${encodeURIComponent(name)}`),
     tailoredResumeUrl: (id) => blobUrl(`/applications/${id}/resume`),
     getApplicationInsights: (id) => request(`/applications/${id}/insights`),
+    followUp: (id, note = '') => request(`/applications/${id}/follow-up`, { method: 'POST', body: { note } }),
+    mockInterview: (id, messages) => request(`/applications/${id}/mock-interview`, { method: 'POST', body: { messages } }),
+    applicationReport: (days = 7) => request(`/applications/report?days=${days}`),
+    emailReport: (days = 7) => request(`/applications/report/email?days=${days}`, { method: 'POST' }),
 
     // Answer bank: [{question, answer, source}]; an empty answer deletes the saved one.
     listAnswers: () => request('/screening-answers'),

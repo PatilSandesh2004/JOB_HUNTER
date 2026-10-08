@@ -65,3 +65,32 @@ def test_rejects_unsupported_and_empty_files():
         parser.extract_text(b"data", "resume.exe")
     with pytest.raises(ResumeParseError):
         parser.extract_text(b"   ", "resume.txt")
+
+
+class StubLLM:
+    available = True
+
+    async def complete_json(self, system, user, **_):
+        assert "target_roles" in user
+        return {
+            "name": "Asha Rao",
+            "current_role": "Backend Engineer",
+            "skills": ["FastAPI"],
+            "target_roles": ["Backend Engineer", "Platform Engineer", "Backend Engineer", ""],
+        }
+
+
+async def test_llm_suggests_target_roles_from_the_resume():
+    profile = await ResumeParserService(llm=StubLLM()).parse(RESUME)
+    assert profile.preferences.preferred_roles == ["Backend Engineer", "Platform Engineer"]
+
+
+async def test_uploading_a_resume_keeps_target_roles_you_set(client):
+    from ai_service.tests.fakes import RESUME as SHORT_RESUME
+
+    await client.post("/api/v1/candidates/me/resume", files={"file": ("cv.txt", SHORT_RESUME, "text/plain")})
+    profile = (await client.get("/api/v1/candidates/me")).json()
+    profile["preferences"]["preferred_roles"] = ["Data Engineer"]
+    await client.put("/api/v1/candidates/me", json=profile)
+    await client.post("/api/v1/candidates/me/resume", files={"file": ("cv.txt", SHORT_RESUME, "text/plain")})
+    assert (await client.get("/api/v1/candidates/me")).json()["preferences"]["preferred_roles"] == ["Data Engineer"]
