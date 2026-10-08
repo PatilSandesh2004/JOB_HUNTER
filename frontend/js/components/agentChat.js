@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { refreshApplications } from '../app.js';
 import { store } from '../state.js';
 import { openModal, closeModal, esc, setBusy, toast } from '../utils.js';
 
@@ -103,6 +104,7 @@ function showQuestionModal(app, question) {
                     // and either show the next question or close it.
                     input.value = '';
                     input.disabled = true;
+                    refreshApplications();
                 } catch (err) {
                     toast(err.message, 'error');
                 } finally {

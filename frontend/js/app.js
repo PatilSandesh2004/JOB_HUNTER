@@ -102,7 +102,7 @@ function schedulePolling(active) {
     }
 }
 
-async function refreshApplications() {
+export async function refreshApplications() {
     try {
         const before = new Map(store.state.applications.map((a) => [a.id, a.status]));
         const applications = await api.listApplications();
