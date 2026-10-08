@@ -115,6 +115,21 @@ async def mock_interview(
     return await coach.turn(db, application_id, [m.model_dump() for m in body.messages])
 
 
+class AnswerSubmission(BaseModel):
+    label: str
+    answer: str
+    remember: bool = True
+
+@router.post("/{application_id}/answer", response_model=ApplicationRead)
+async def answer_application_question(
+    application_id: str,
+    body: AnswerSubmission,
+    db: AsyncSession = Depends(get_db),
+    service: ApplicationService = Depends(get_application_service),
+):
+    """Answer a required question that the agent couldn't fill out. Resumes the agent if no more questions."""
+    return await service.answer_question(db, application_id, body.label, body.answer, body.remember)
+
 class FollowUp(BaseModel):
     note: str = ""
 

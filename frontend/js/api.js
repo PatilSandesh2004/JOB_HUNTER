@@ -184,6 +184,8 @@ export const api = {
     updateApplication: (id, patch) => request(`/applications/${id}`, { method: 'PATCH', body: patch }),
     approveApplication: (id) => request(`/applications/${id}/approve`, { method: 'POST' }),
     refillApplication: (id) => request(`/applications/${id}/refill`, { method: 'POST' }),
+    answerApplicationQuestion: (id, label, answer, remember) => 
+        request(`/applications/${id}/answer`, { method: 'POST', body: { label, answer, remember } }),
     screenshotUrl: (id) => blobUrl(`/applications/${id}/screenshot`),
     stepScreenshotUrl: (id, name) => blobUrl(`/applications/${id}/screenshots/${encodeURIComponent(name)}`),
     tailoredResumeUrl: (id) => blobUrl(`/applications/${id}/resume`),

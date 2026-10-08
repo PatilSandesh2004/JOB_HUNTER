@@ -11,6 +11,7 @@ class ApplicationStatus(StrEnum):
     PENDING_APPROVAL = "PENDING_APPROVAL"  # form filled (not submitted); waiting for the user
     SUBMITTING = "SUBMITTING"
     APPLIED = "APPLIED"  # submitted and a confirmation was detected
+    NEEDS_INPUT = "NEEDS_INPUT"  # agent needs the user to answer a required question
     NEEDS_MANUAL = "NEEDS_MANUAL"  # captcha, login wall, missing required fields, unverified submit
     AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION"  # user opened the company site to apply themselves
     FAILED = "FAILED"

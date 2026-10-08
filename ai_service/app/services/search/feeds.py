@@ -306,13 +306,13 @@ class AdzunaFeed(Feed):
         }
         if max_days:
             params_base["max_days_old"] = max_days
-        url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
         requests = [
-            params_base | {"what": title} | ({"where": place} if place else {})
+            (page, params_base | {"what": title} | ({"where": place} if place else {}))
             for title in titles[:2]
             for place in places
+            for page in (1, 2, 3)
         ]
-        results = await asyncio.gather(*(self._get_json(client, url, p) for p in requests), return_exceptions=True)
+        results = await asyncio.gather(*(self._get_json(client, f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}", p) for page, p in requests), return_exceptions=True)
         postings: dict[str, RawJobPosting] = {}
         for data in results:
             if isinstance(data, BaseException):

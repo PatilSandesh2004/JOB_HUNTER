@@ -102,7 +102,7 @@ class SearchService:
             expanded += [f"{q} site:{site}" for q in leading for site in ATS_SEARCH_SITES]
         # Job sites (LinkedIn, Naukri, Indeed): read from search results only; the sites are never scraped.
         # One site: per query, because most engines ignore site: filters combined with OR.
-        expanded += [f"{q} site:{site}" for q in queries[:1] for site in self.config.search_job_sites]
+        expanded += [f"{q} site:{site}" for q in queries[:3] for site in self.config.search_job_sites]
         return list(dict.fromkeys(expanded))
 
     async def _web_query(self, query: str, client: httpx.AsyncClient, time_range: str | None) -> list[RawJobPosting]:

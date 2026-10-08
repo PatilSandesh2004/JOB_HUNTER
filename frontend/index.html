@@ -180,7 +180,7 @@
             </div>
 
             <div class="section-header">
-                <h2><i class="fa-solid fa-list-check"></i> Recommended Opportunities</h2>
+                <h2 id="job-section-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Recommended Jobs</h2>
                 <div class="filter-controls" id="job-filters">
                     <button class="filter-btn active" data-filter="all">All</button>
                     <button class="filter-btn" data-filter="strong">70%+ Match</button>
@@ -193,8 +193,9 @@
             </div>
             <div class="job-toolbar">
                 <div class="view-toggle" id="job-view" role="group" aria-label="Which jobs">
-                    <button class="view-btn" data-view="search" id="view-search" disabled>This search</button>
-                    <button class="view-btn active" data-view="all" id="view-all">All saved jobs</button>
+                    <button class="view-btn active" data-view="recommended" id="view-recommended"><i class="fa-solid fa-wand-magic-sparkles"></i> Recommended Jobs</button>
+                    <button class="view-btn" data-view="search" id="view-search" disabled><i class="fa-solid fa-magnifying-glass"></i> Search Results</button>
+                    <button class="view-btn" data-view="all" id="view-all"><i class="fa-solid fa-layer-group"></i> All Saved Jobs</button>
                 </div>
                 <label class="input-field compact"><i class="fa-solid fa-filter"></i>
                     <input type="search" id="job-query" placeholder="Filter by title, company, skill…" aria-label="Filter jobs"></label>

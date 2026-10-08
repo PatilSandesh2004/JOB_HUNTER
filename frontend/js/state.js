@@ -31,6 +31,6 @@ export const store = {
 };
 
 export const IN_FLIGHT = new Set(['PROCESSING', 'SUBMITTING']);
-export const NEEDS_REVIEW = new Set(['PENDING_APPROVAL', 'NEEDS_MANUAL', 'FAILED']);
+export const NEEDS_REVIEW = new Set(['PENDING_APPROVAL', 'NEEDS_MANUAL', 'FAILED', 'NEEDS_INPUT']);
 export const AWAITING = 'AWAITING_CONFIRMATION';
 export const SUBMITTED = new Set(['APPLIED', 'INTERVIEW', 'OFFER', 'REJECTED']);

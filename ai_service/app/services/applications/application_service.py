@@ -38,7 +38,7 @@ from ai_service.app.services.tasks.runner import Handler, RetryLater, TaskFailed
 
 logger = logging.getLogger("jobpilot.applications")
 
-APPROVABLE = {ApplicationStatus.PENDING_APPROVAL, ApplicationStatus.NEEDS_MANUAL, ApplicationStatus.FAILED}
+APPROVABLE = {ApplicationStatus.PENDING_APPROVAL, ApplicationStatus.NEEDS_INPUT, ApplicationStatus.NEEDS_MANUAL, ApplicationStatus.FAILED}
 IN_FLIGHT = {ApplicationStatus.PROCESSING, ApplicationStatus.SUBMITTING}
 MANUAL_STATUSES = {
     ApplicationStatus.APPLIED,
@@ -217,6 +217,40 @@ class ApplicationService:
             events=[timeline_event("Re-filling the form", "Using your latest profile and saved answers")],
         )
         await self._enqueue(session, TaskKind.FILL_APPLICATION, row.id)
+        return to_schema(row)
+
+    async def answer_question(
+        self, session: AsyncSession, application_id: str, label: str, answer: str, remember: bool
+    ) -> ApplicationRead:
+        """Answer a missing required question and save it. If no questions remain, re-fill the form."""
+        repo = ApplicationRepository(session)
+        row = await self._get(repo, application_id)
+        if ApplicationStatus(row.status) != ApplicationStatus.NEEDS_INPUT:
+            raise ApplicationConflictError(f"Application is not waiting for input (status is {row.status})")
+
+        from ai_service.app.schemas.screening import ScreeningAnswerWrite
+        # Save to answer bank if requested
+        if remember and answer.strip():
+            await ScreeningAnswerRepository(session).upsert_many(
+                [ScreeningAnswerWrite(question=label, answer=answer.strip(), source="user")]
+            )
+
+        # Update the application's questions list
+        remaining = [q for q in row.questions if q["label"] != label]
+        events = [timeline_event("Answered question", f"Q: {label}\nA: {answer}")]
+        
+        row = await repo.update(row, questions=remaining, events=events)
+
+        # If all questions are answered, unpause the agent
+        if not remaining:
+            row = await repo.update(
+                row,
+                status=ApplicationStatus.PROCESSING.value,
+                events=[timeline_event("All questions answered", "Resuming the agent")],
+            )
+            submit = ApplyMode(row.mode) == ApplyMode.AUTO
+            await self._enqueue(session, TaskKind.FILL_APPLICATION, row.id, submit=submit)
+
         return to_schema(row)
 
     async def update(
@@ -434,7 +468,7 @@ class ApplicationService:
 def _result_fields(result: FillResult, submitted: bool) -> dict:
     status = {
         FillOutcome.SUBMITTED: ApplicationStatus.APPLIED,
-        FillOutcome.FILLED: ApplicationStatus.PENDING_APPROVAL,
+        FillOutcome.FILLED: ApplicationStatus.NEEDS_INPUT if result.missing_required else ApplicationStatus.PENDING_APPROVAL,
         FillOutcome.NEEDS_MANUAL: ApplicationStatus.NEEDS_MANUAL,
         FillOutcome.FAILED: ApplicationStatus.FAILED,
     }[result.outcome]

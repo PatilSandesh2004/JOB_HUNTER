@@ -10,6 +10,7 @@ import { renderInsights, renderPrepSelect } from './components/prepare.js';
 import { fillProfileForm, readProfileForm, renderAnswers, renderNavbar } from './components/profile.js';
 import { intervalOptions, renderResumes, renderSavedSearches, resumeCheckHtml } from './components/resumes.js';
 import { renderBoards, renderInbox } from './components/sources.js';
+import { checkAgentQuestions } from './components/agentChat.js';
 import { AWAITING, IN_FLIGHT, NEEDS_REVIEW, SUBMITTED, store } from './state.js';
 import { closeModal, esc, openModal, setBusy, splitList, toast } from './utils.js';
 
@@ -47,12 +48,23 @@ store.subscribe((state) => {
     $('review-count').hidden = review === 0;
     document.querySelectorAll('#job-view .view-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === state.jobView));
     $('view-search').disabled = !state.searchJobs;
+    const titleHeader = $('job-section-title');
+    if (titleHeader) {
+        const titleMap = {
+            recommended: '<i class="fa-solid fa-wand-magic-sparkles"></i> Recommended Jobs (Matched to your profile)',
+            search: '<i class="fa-solid fa-magnifying-glass"></i> Search Results',
+            all: '<i class="fa-solid fa-layer-group"></i> All Saved Jobs',
+        };
+        titleHeader.innerHTML = titleMap[state.jobView] || titleMap.recommended;
+    }
     $('applications-board').hidden = state.appView !== 'board';
     $('applications-list').hidden = state.appView !== 'list';
     document.querySelectorAll('#app-view .view-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === state.appView));
 
+    checkAgentQuestions(state.applications);
+
     schedulePolling(state.applications.some(
-        (a) => IN_FLIGHT.has(a.status) || (a.status === AWAITING && a.cover_letter === null),
+        (a) => IN_FLIGHT.has(a.status) || (a.status === AWAITING && a.cover_letter === null) || a.status === 'NEEDS_INPUT',
     ));
 });
 
@@ -115,10 +127,16 @@ function announce(app) {
     toast(text, kind);
 }
 
-// ---------------------------------------------------------------- navigation
-function showTab(tabId) {
+const TAB_KEY = 'jobpilot.activeTab';
+
+function showTab(tabId, updateHash = true) {
+    if (!document.getElementById(tabId)) return;
     document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tabId));
     document.querySelectorAll('.tab-content').forEach((c) => c.classList.toggle('active', c.id === tabId));
+    try { localStorage.setItem(TAB_KEY, tabId); } catch { /* storage unavailable */ }
+    if (updateHash && window.location.hash !== `#${tabId}`) {
+        history.pushState(null, '', `#${tabId}`);
+    }
     if (tabId === 'profile-tab') {
         loadHealth();
         loadSources();
@@ -130,11 +148,42 @@ function showTab(tabId) {
 
 document.querySelectorAll('.nav-btn').forEach((btn) => btn.addEventListener('click', () => showTab(btn.dataset.tab)));
 
+window.addEventListener('popstate', () => {
+    const hash = window.location.hash.replace('#', '');
+    if (hash && document.getElementById(hash)) {
+        showTab(hash, false);
+    }
+});
+
 // ---------------------------------------------------------------- job list: views, filters, sorting, paging
+function filterRecommendedJobs(allJobs, profile) {
+    if (!allJobs || !Array.isArray(allJobs)) return [];
+    return allJobs.filter(({ match, job }) => {
+        if (match) {
+            if (match.passed_hard_filters === false) return false;
+            if (match.ai_verdict === 'no') return false;
+            if (match.overall_match < 50) return false;
+        }
+        if (profile && profile.years_of_experience != null && profile.years_of_experience !== '') {
+            const userExp = Number(profile.years_of_experience);
+            if (!isNaN(userExp) && job.experience_required != null) {
+                if (job.experience_required > userExp + 2) return false;
+                if (job.experience_required >= 7 && userExp <= 2) return false;
+            }
+        }
+        return true;
+    });
+}
+
 function setJobs(patch) {
-    // `jobs` is what the list shows: this search's results, or every stored job.
     const next = { ...store.state, ...patch };
-    const jobs = next.jobView === 'search' && next.searchJobs ? next.searchJobs : next.allJobs;
+    const view = next.jobView || 'recommended';
+    let jobs = next.allJobs || [];
+    if (view === 'search' && next.searchJobs) {
+        jobs = next.searchJobs;
+    } else if (view === 'recommended') {
+        jobs = filterRecommendedJobs(next.allJobs, next.profile);
+    }
     store.set({ ...patch, jobs });
 }
 
@@ -603,12 +652,13 @@ async function saveQuestionAnswers(card, appId) {
         .map((el) => ({
             question: el.dataset.label,
             answer: el.value.trim(),
-            source: el.value.trim() === el.dataset.suggestion ? 'suggested' : 'user',
         }));
     if (!answers.length) throw new Error('Answer at least one question first');
-    store.set({ answers: await api.saveAnswers(answers) });
+    
+    // Send each answer to the backend which automatically queues a refill when all are answered
+    await Promise.all(answers.map(a => api.answerApplicationQuestion(appId, a.question, a.answer, true)));
+    
     inputs.forEach((el) => { el.dataset.dirty = '0'; });
-    return api.refillApplication(appId);
 }
 
 async function editAnswer(button, action) {
@@ -989,12 +1039,20 @@ function readLastVisit() {
             api.getProfile(), api.listJobs(), api.listApplications(), api.listAnswers(),
         ]);
         store.set({ profile, applications, answers });
-        setJobs({ allJobs, jobView: 'all' });
+        setJobs({ allJobs, jobView: profile ? 'recommended' : 'all' });
         fillProfileForm(profile);
         prefillSearch(profile);
         initResumeChoice(profile);
         loadSavedSearches();
-        if (!profile) showTab('profile-tab');
+        const hash = window.location.hash.replace('#', '');
+        let initialTab = 'jobs-tab';
+        if (hash && document.getElementById(hash)) {
+            initialTab = hash;
+        } else {
+            try { initialTab = localStorage.getItem(TAB_KEY) || 'jobs-tab'; } catch { /* storage unavailable */ }
+        }
+        if (!profile) initialTab = 'profile-tab';
+        showTab(initialTab, false);
     } catch (err) {
         store.set({});
         toast(`Could not load data: ${err.message}`, 'error');
