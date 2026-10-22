@@ -41,12 +41,18 @@ LANDING = '<html><body><h1>Data Engineer</h1><a href="/apply">Apply for this job
 THANKS = "<html><body><h1>Thank you for applying!</h1><p>We have received your application.</p></body></html>"
 
 
+CAPTCHA_FORM = FORM.format(extra='<div class="g-recaptcha" style="width:100px; height:100px;"></div>')
+CAPTCHA_ERROR_PAGE = "<html><body><h1>Verification Required</h1><p>Please confirm that you are human.</p><div class='g-recaptcha' style='width:100px; height:100px;'></div></body></html>"
+
+
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         pages = {
             "/apply": FORM.format(extra=""),
             "/apply-consent": FORM.format(extra=CONSENT),
             "/apply-screening": FORM.format(extra=SCREENING),
+            "/apply-captcha": CAPTCHA_FORM,
+            "/apply-post-captcha": FORM.replace('action="/thanks"', 'action="/post-captcha"').format(extra=""),
             "/landing": LANDING,
             "/no-form": "<html><body><p>Closed.</p></body></html>",
         }
@@ -55,7 +61,10 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         length = int(self.headers.get("Content-Length", 0))
         self.server.submissions.append(self.rfile.read(length))  # type: ignore[attr-defined]
-        self._send(THANKS)
+        if self.path == "/post-captcha":
+            self._send(CAPTCHA_ERROR_PAGE)
+        else:
+            self._send(THANKS)
 
     def _send(self, body: str, code: int = 200) -> None:
         data = body.encode()

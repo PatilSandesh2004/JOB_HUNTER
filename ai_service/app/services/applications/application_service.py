@@ -41,6 +41,7 @@ logger = logging.getLogger("jobpilot.applications")
 APPROVABLE = {ApplicationStatus.PENDING_APPROVAL, ApplicationStatus.NEEDS_INPUT, ApplicationStatus.NEEDS_MANUAL, ApplicationStatus.FAILED}
 IN_FLIGHT = {ApplicationStatus.PROCESSING, ApplicationStatus.SUBMITTING}
 MANUAL_STATUSES = {
+    ApplicationStatus.SAVED,
     ApplicationStatus.APPLIED,
     ApplicationStatus.INTERVIEW,
     ApplicationStatus.OFFER,
@@ -394,7 +395,8 @@ class ApplicationService:
             questions = await self._suggest_answers(result.unanswered, candidate, job_with_match.job)
             if any(q.get("suggestion") for q in questions):
                 events.append(timeline_event("Drafted answers for you to check", f"{len(questions)} open question(s)"))
-            await repo.update(row, **materials, **_result_fields(result, submit), questions=questions, events=events)
+            result_fields = _result_fields(result, submit, questions)
+            await repo.update(row, **materials, **result_fields, questions=questions, events=events)
 
     async def _suggest_answers(self, unanswered: list[dict], candidate, job) -> list[dict]:
         if not unanswered:
@@ -465,13 +467,28 @@ class ApplicationService:
         return affected
 
 
-def _result_fields(result: FillResult, submitted: bool) -> dict:
+def _result_fields(result: FillResult, submitted: bool, questions: list[dict] | None = None) -> dict:
+    # When the form was filled but some required fields are unanswered, decide the status based on
+    # whether the AI was able to suggest answers for all of them.
+    # – All suggestions available → PENDING_APPROVAL (user just reviews & confirms)
+    # – Any suggestion missing   → NEEDS_INPUT (user must actively type something)
+    if result.outcome == FillOutcome.FILLED and result.missing_required:
+        all_suggested = bool(questions) and all(q.get("suggestion") for q in (questions or []))
+        filled_status = ApplicationStatus.PENDING_APPROVAL if all_suggested else ApplicationStatus.NEEDS_INPUT
+    else:
+        filled_status = ApplicationStatus.PENDING_APPROVAL
+
     status = {
         FillOutcome.SUBMITTED: ApplicationStatus.APPLIED,
-        FillOutcome.FILLED: ApplicationStatus.NEEDS_INPUT if result.missing_required else ApplicationStatus.PENDING_APPROVAL,
+        FillOutcome.FILLED: filled_status,
         FillOutcome.NEEDS_MANUAL: ApplicationStatus.NEEDS_MANUAL,
         FillOutcome.FAILED: ApplicationStatus.FAILED,
     }[result.outcome]
+
+    # Hard guard: If a CAPTCHA was detected, it MUST NEVER be marked as APPLIED
+    if result.captcha_detected and status == ApplicationStatus.APPLIED:
+        status = ApplicationStatus.NEEDS_MANUAL
+
     message = result.message
     if result.outcome == FillOutcome.FILLED and (result.missing_required or result.captcha_detected):
         notes = []
@@ -480,14 +497,19 @@ def _result_fields(result: FillResult, submitted: bool) -> dict:
         if result.captcha_detected:
             notes.append("CAPTCHA on page; you will need to submit manually")
         message = ". ".join(notes)
+    elif result.captcha_detected and not message:
+        message = "CAPTCHA on page; you will need to submit manually"
+
     if result.outcome == FillOutcome.FAILED and result.submit_attempted:
         message = f"{message}. Submit may have gone through; check before retrying."
+
+    is_applied = submitted and status == ApplicationStatus.APPLIED and not result.captcha_detected
     return {
         "status": status.value,
         "filled_fields": result.filled_fields,
         "missing_fields": result.missing_required,
         "screenshot_path": result.screenshot_path,
-        "confirmation": result.confirmation,
+        "confirmation": result.confirmation if is_applied else None,
         "error": message,
-        "applied_at": datetime.now(UTC) if submitted and result.outcome == FillOutcome.SUBMITTED else None,
+        "applied_at": datetime.now(UTC) if is_applied else None,
     }

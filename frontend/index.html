@@ -26,6 +26,10 @@
             <button class="nav-btn active" data-tab="jobs-tab">
                 <i class="fa-solid fa-briefcase"></i> Jobs
             </button>
+            <button class="nav-btn" data-tab="saved-tab" id="nav-btn-saved">
+                <i class="fa-solid fa-bookmark"></i> Saved
+                <span class="badge-count badge-saved" id="nav-saved-count" hidden>0</span>
+            </button>
             <button class="nav-btn" data-tab="applications-tab">
                 <i class="fa-solid fa-paper-plane"></i> Applications
                 <span class="badge-count" id="review-count" hidden>0</span>
@@ -189,13 +193,15 @@
                     <button class="filter-btn" data-filter="remote">Remote</button>
                     <button class="filter-btn" data-filter="salary">Has salary</button>
                     <button class="filter-btn" data-filter="visa">Visa Sponsored</button>
+                    <button class="filter-btn filter-btn-saved" data-filter="saved" id="filter-saved"><i class="fa-solid fa-bookmark"></i> Bookmarked</button>
                 </div>
             </div>
             <div class="job-toolbar">
                 <div class="view-toggle" id="job-view" role="group" aria-label="Which jobs">
                     <button class="view-btn active" data-view="recommended" id="view-recommended"><i class="fa-solid fa-wand-magic-sparkles"></i> Recommended Jobs</button>
                     <button class="view-btn" data-view="search" id="view-search" disabled><i class="fa-solid fa-magnifying-glass"></i> Search Results</button>
-                    <button class="view-btn" data-view="all" id="view-all"><i class="fa-solid fa-layer-group"></i> All Saved Jobs</button>
+                    <button class="view-btn" data-view="saved" id="view-saved"><i class="fa-solid fa-bookmark"></i> Saved <span class="badge-count badge-saved-sm" id="view-saved-count">0</span></button>
+                    <button class="view-btn" data-view="all" id="view-all"><i class="fa-solid fa-layer-group"></i> All Open Postings</button>
                 </div>
                 <label class="input-field compact"><i class="fa-solid fa-filter"></i>
                     <input type="search" id="job-query" placeholder="Filter by title, company, skill…" aria-label="Filter jobs"></label>
@@ -208,6 +214,55 @@
                     </select></label>
             </div>
             <div id="jobs-container" class="jobs-grid"></div>
+        </section>
+
+        <!-- SAVED JOBS DEDICATED TAB -->
+        <section id="saved-tab" class="tab-content">
+            <div class="card-panel saved-header-panel">
+                <div class="panel-header panel-header-row">
+                    <div>
+                        <h2><i class="fa-solid fa-bookmark text-primary"></i> Saved Jobs &amp; Shortlist</h2>
+                        <p>Keep track of opportunities you want to apply to later. Prepare cover letters, customize resumes, or apply directly.</p>
+                    </div>
+                    <div class="saved-quick-actions">
+                        <button type="button" class="btn-secondary btn-sm" id="btn-export-saved" title="Export saved jobs as JSON / CSV">
+                            <i class="fa-solid fa-file-export"></i> Export Shortlist
+                        </button>
+                        <button type="button" class="btn-primary btn-sm" id="btn-browse-jobs">
+                            <i class="fa-solid fa-magnifying-glass"></i> Find More Jobs
+                        </button>
+                    </div>
+                </div>
+
+                <div class="saved-stats-bar">
+                    <div class="saved-stat-item">
+                        <span class="stat-number" id="saved-total-num">0</span>
+                        <span class="stat-desc">Bookmarked Roles</span>
+                    </div>
+                    <div class="saved-stat-item">
+                        <span class="stat-number" id="saved-highmatch-num">0</span>
+                        <span class="stat-desc">Strong Fit (70%+)</span>
+                    </div>
+                    <div class="saved-stat-item">
+                        <span class="stat-number" id="saved-remote-num">0</span>
+                        <span class="stat-desc">Remote Opportunities</span>
+                    </div>
+                </div>
+
+                <div class="job-toolbar" style="margin-top: 1.25rem;">
+                    <label class="input-field compact"><i class="fa-solid fa-filter"></i>
+                        <input type="search" id="saved-query" placeholder="Filter bookmarked jobs by title, company, skills…" aria-label="Filter saved jobs"></label>
+                    <label class="input-field compact"><i class="fa-solid fa-arrow-down-wide-short"></i>
+                        <select id="saved-sort" aria-label="Sort saved jobs">
+                            <option value="newest">Recently Saved</option>
+                            <option value="match">Best match</option>
+                            <option value="salary">Highest salary</option>
+                            <option value="company">Company A–Z</option>
+                        </select></label>
+                </div>
+            </div>
+
+            <div id="saved-jobs-container" class="jobs-grid"></div>
         </section>
 
         <!-- 2. APPLICATIONS TAB -->

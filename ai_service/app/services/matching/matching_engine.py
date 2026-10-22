@@ -24,6 +24,7 @@ __all__ = [
     "candidate_skill_profile",
     "default_band",
     "experience_band",
+    "experience_fit",
     "role_similarity",
     "title_seniority_conflict",
 ]
@@ -72,6 +73,39 @@ def default_band(years: float | None) -> tuple[float, float | None] | None:
     if not years:
         return None
     return max(0.0, years - 1), years + 1.5
+
+
+FITS, TOO_SENIOR, TOO_JUNIOR, UNKNOWN = "fits", "too_senior", "too_junior", "unknown"
+
+
+def experience_fit(
+    required: float | None,
+    required_max: float | None,
+    band: tuple[float, float | None] | None,
+    strict: bool = False,
+) -> str:
+    """How a posting's experience ask compares with the wanted band: fits / too_senior / too_junior / unknown.
+
+    Flexible (default): only the posting's minimum counts, with half a year of slack ("3-5" fits 1-3).
+    Strict (the user picked a range): the posting must start inside the range, and a range that starts at
+    the top of the band may not run more than a year past it. For 1-3: "1-3", "0-2", "2-4", "2+" and "3+"
+    fit; "3-5", "4+" and "5-7" do not.
+    """
+    if band is None:
+        return FITS if required is not None else UNKNOWN
+    if required is None:
+        return UNKNOWN
+    low, high = band
+    if high is not None:
+        if required > high + (0.0 if strict else 0.5):
+            return TOO_SENIOR
+        if strict and required_max is not None and required >= high and required_max > high + 1:
+            return TOO_SENIOR
+    if low >= 2 and required_max is not None and required_max < low - 1:
+        return TOO_JUNIOR
+    if low >= 2 and required_max is None and 0 < required < low - 2:
+        return TOO_JUNIOR
+    return FITS
 
 
 def title_seniority_conflict(
@@ -131,6 +165,7 @@ class MatchingEngineService:
         target_roles: list[str] | None = None,
         semantic: float | None = None,
         feedback: "FeedbackModel | None" = None,
+        strict_experience: bool = False,
     ) -> MatchResult:
         """Score one job for a candidate.
 
@@ -138,12 +173,14 @@ class MatchingEngineService:
         `target_roles`: the roles searched for; without them the profile's target roles and current role.
         `semantic`: resume-to-description similarity (0-100), when available.
         `feedback`: what you hid and applied to, nudging similar jobs down or up.
+        `strict_experience`: the wanted band is a hard range (see experience_fit).
         """
         reasons: list[str] = []
         title_score = self._title_score(candidate, job, reasons, target_roles)
         skill_score, matched, missing, missing_preferred = self._skill_score(candidate, job, reasons)
         band = experience_band(experience) or default_band(candidate.years_of_experience)
-        exp_score = self._experience_score(job, reasons, band, candidate.years_of_experience)
+        exp_score = self._experience_score(job, reasons, band, candidate.years_of_experience, strict_experience)
+        fit = experience_fit(job.experience_required, job.experience_max, band, strict_experience)
         exp_ok = exp_score > 20.0
         loc_score, loc_ok = self._location_score(candidate, job, reasons)
         sponsor_score, sponsor_ok = self._sponsorship_score(candidate, job, reasons)
@@ -190,6 +227,7 @@ class MatchingEngineService:
             missing_skills=missing,
             missing_preferred=missing_preferred,
             passed_hard_filters=passed,
+            experience_fit=fit,
             confidence=confidence,
             reasons=reasons,
         )
@@ -247,6 +285,7 @@ class MatchingEngineService:
         reasons: list[str],
         band: tuple[float, float | None] | None,
         candidate_years: float | None,
+        strict: bool = False,
     ) -> float:
         required, required_max = job.experience_required, job.experience_max
         if band is None:
@@ -263,7 +302,10 @@ class MatchingEngineService:
         asked = f"{required:g}-{required_max:g}" if required_max is not None else f"{required:g}+"
         if required > ceiling:
             reasons.append(f"Asks for {asked} years; you fit {wanted}")
-            return max(0.0, 100.0 - 50.0 * (required - ceiling))
+            return 0.0 if strict else max(0.0, 100.0 - 50.0 * (required - ceiling))
+        if experience_fit(required, required_max, band, strict) == TOO_SENIOR:
+            reasons.append(f"Asks for {asked} years; above the {wanted} you chose")
+            return 15.0
         if required_max is not None and required_max < low - 1:
             reasons.append(f"Asks for {asked} years; junior for your {wanted}")
             return 45.0

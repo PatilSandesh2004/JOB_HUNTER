@@ -1,9 +1,10 @@
 import { api, auth, setToken } from './api.js';
+import { openAutoApply } from './components/AutoApply.js';
 import { renderApplications } from './components/approvalQueue.js';
 import { renderBoard, renderFollowUps, renderReport } from './components/board.js';
 import { renderHealth } from './components/health.js';
 import { renderInterview } from './components/interview.js';
-import { PAGE_SIZE, renderJobFeed, visibleJobs } from './components/jobFeed.js';
+import { PAGE_SIZE, renderJobFeed, renderSavedJobsFeed, visibleJobs } from './components/jobFeed.js';
 import { setupLocationSuggest } from './components/locationSuggest.js';
 import { outreachHtml, renderContacts } from './components/network.js';
 import { renderInsights, renderPrepSelect } from './components/prepare.js';
@@ -23,6 +24,7 @@ let pollTimer = null;
 let renderedAnswers = null;
 store.subscribe((state) => {
     renderJobFeed($('jobs-container'), state);
+    renderSavedJobsFeed($('saved-jobs-container'), state);
     renderApplications($('applications-list'), state.applications);
     renderBoard($('applications-board'), state.applications);
     renderFollowUps($('follow-up-banner'), state.applications);
@@ -43,6 +45,30 @@ store.subscribe((state) => {
     $('stat-visa').textContent = shown.filter((j) => j.job.visa_sponsorship.status === 'YES').length;
     $('stat-applied').textContent = state.applications.filter((a) => SUBMITTED.has(a.status)).length;
 
+    // Saved count updates
+    const savedApps = state.applications.filter((a) => a.status === 'SAVED');
+    const savedCount = savedApps.length;
+    const navSavedCount = $('nav-saved-count');
+    if (navSavedCount) {
+        navSavedCount.textContent = savedCount;
+        navSavedCount.hidden = savedCount === 0;
+    }
+    const viewSavedCount = $('view-saved-count');
+    if (viewSavedCount) {
+        viewSavedCount.textContent = savedCount;
+    }
+    if ($('saved-total-num')) $('saved-total-num').textContent = savedCount;
+
+    // Calculate match stats for saved jobs
+    const savedJobIdSet = new Set(savedApps.map((a) => a.job_id));
+    const savedJobItems = (state.allJobs || []).filter((j) => savedJobIdSet.has(j.job.id));
+    if ($('saved-highmatch-num')) {
+        $('saved-highmatch-num').textContent = savedJobItems.filter((j) => j.match?.overall_match >= 70).length;
+    }
+    if ($('saved-remote-num')) {
+        $('saved-remote-num').textContent = savedJobItems.filter((j) => j.job.workplace_type === 'REMOTE').length;
+    }
+
     const review = state.applications.filter((a) => NEEDS_REVIEW.has(a.status) || a.status === AWAITING || a.follow_up_due).length;
     $('review-count').textContent = review;
     $('review-count').hidden = review === 0;
@@ -53,7 +79,8 @@ store.subscribe((state) => {
         const titleMap = {
             recommended: '<i class="fa-solid fa-wand-magic-sparkles"></i> Recommended Jobs (Matched to your profile)',
             search: '<i class="fa-solid fa-magnifying-glass"></i> Search Results',
-            all: '<i class="fa-solid fa-layer-group"></i> All Saved Jobs',
+            saved: '<i class="fa-solid fa-bookmark"></i> Bookmarked Jobs (Shortlist)',
+            all: '<i class="fa-solid fa-layer-group"></i> All Open Postings',
         };
         titleHeader.innerHTML = titleMap[state.jobView] || titleMap.recommended;
     }
@@ -181,6 +208,9 @@ function setJobs(patch) {
     let jobs = next.allJobs || [];
     if (view === 'search' && next.searchJobs) {
         jobs = next.searchJobs;
+    } else if (view === 'saved') {
+        const savedIds = new Set((next.applications || []).filter((a) => a.status === 'SAVED').map((a) => a.job_id));
+        jobs = (next.allJobs || []).filter((j) => savedIds.has(j.job.id));
     } else if (view === 'recommended') {
         jobs = filterRecommendedJobs(next.allJobs, next.profile);
     }
@@ -212,6 +242,59 @@ $('job-query').addEventListener('input', () => {
     clearTimeout(queryTimer);
     queryTimer = setTimeout(() => store.set({ jobQuery: $('job-query').value.trim(), visibleCount: PAGE_SIZE }), 150);
 });
+
+// Saved Tab Controls
+let savedQueryTimer = null;
+const refreshSavedFeed = () => {
+    const query = $('saved-query') ? $('saved-query').value.trim() : '';
+    const sort = $('saved-sort') ? $('saved-sort').value : 'newest';
+    renderSavedJobsFeed($('saved-jobs-container'), store.state, { query, sort });
+};
+
+if ($('saved-query')) {
+    $('saved-query').addEventListener('input', () => {
+        clearTimeout(savedQueryTimer);
+        savedQueryTimer = setTimeout(refreshSavedFeed, 150);
+    });
+}
+if ($('saved-sort')) {
+    $('saved-sort').addEventListener('change', refreshSavedFeed);
+}
+if ($('btn-browse-jobs')) {
+    $('btn-browse-jobs').addEventListener('click', () => showTab('jobs-tab'));
+}
+if ($('btn-export-saved')) {
+    $('btn-export-saved').addEventListener('click', () => {
+        const savedApps = (store.state.applications || []).filter((a) => a.status === 'SAVED');
+        const savedIds = new Set(savedApps.map((a) => a.job_id));
+        const savedItems = (store.state.allJobs || []).filter((j) => savedIds.has(j.job.id));
+        if (!savedItems.length) {
+            return toast('No saved jobs to export', 'warn');
+        }
+        const exportData = savedItems.map(({ job, match }) => ({
+            id: job.id,
+            title: job.title,
+            company: job.company,
+            location: job.location,
+            workplace_type: job.workplace_type,
+            url: job.application_url,
+            match_score: match ? Math.round(match.overall_match) : null,
+            salary_min: job.salary_min,
+            salary_max: job.salary_max,
+            salary_currency: job.salary_currency,
+            skills: job.required_skills,
+            saved_at: savedApps.find((a) => a.job_id === job.id)?.created_at || null,
+        }));
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `jobpilot_saved_jobs_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast(`Exported ${savedItems.length} saved job${savedItems.length === 1 ? '' : 's'}`, 'success');
+    });
+}
 
 // ---------------------------------------------------------------- search
 function searchParams() {
@@ -377,6 +460,8 @@ document.addEventListener('click', async (e) => {
     const { action, jobId, appId } = target.dataset;
 
     if (action === 'goto-applications') return showTab('applications-tab');
+    if (action === 'goto-saved') return showTab('saved-tab');
+    if (action === 'goto-jobs') return showTab('jobs-tab');
     if (action === 'goto-profile') return showTab('profile-tab');
     if (action === 'show-more-jobs') return store.set({ visibleCount: (store.state.visibleCount || PAGE_SIZE) + PAGE_SIZE });
     if (action === 'show-app-details') return store.set({ appView: 'list' });
@@ -387,6 +472,7 @@ document.addEventListener('click', async (e) => {
     if (action === 'hide-job') return hideJob(jobId);
     if (action === 'block-company') return blockCompany(target.dataset.company);
     if (action === 'save-job') return saveJob(target, jobId);
+    if (action === 'unsave-job') return unsaveJob(target, jobId, appId);
     if (action === 'resume-check') return showResumeCheck(jobId);
     if (action === 'remove-board') return removeBoard(target);
     if (action === 'dismiss-modal') return closeModal();
@@ -411,13 +497,15 @@ document.addEventListener('click', async (e) => {
         return loadSavedSearches();
     }
     if (action === 'delete-resume') return deleteResume(target);
-    if (action === 'auto-apply' && !confirm('Auto-apply submits the form without your review when it is complete and has no CAPTCHA. Continue?')) {
+    if (action === 'auto-apply') {
+        if (!confirm('Auto-apply submits the form automatically when complete and has no CAPTCHA. Continue?')) return;
+        // Open the live progress tab — it will call startAutoApply internally.
+        openAutoApply(jobId);
         return;
     }
 
     const handlers = {
         prepare: () => api.createApplication(jobId, 'review', wantsTailored()),
-        'auto-apply': () => api.createApplication(jobId, 'auto', wantsTailored()),
         approve: () => api.approveApplication(appId),
         'set-status': () => api.updateApplication(appId, { status: target.dataset.status }),
         'follow-up': () => api.followUp(appId),
@@ -442,7 +530,7 @@ document.addEventListener('click', async (e) => {
             }
         }
         await handlers[action]();
-        if (action === 'prepare' || action === 'auto-apply') toast('Agent started: writing cover letter and filling the form', 'info');
+        if (action === 'prepare') toast('Agent started: writing cover letter and filling the form', 'info');
         if (action === 'save-letter') toast('Cover letter saved', 'success');
         if (action === 'save-answers') toast('Answers saved. The agent is filling the form again.', 'success');
         if (action === 'follow-up') toast('Noted. The reminder starts again.', 'success');
@@ -506,10 +594,42 @@ async function saveJob(button, jobId) {
     setBusy(button, true, '');
     try {
         await api.createApplication(jobId, 'save');
-        toast('Saved to your Applications board', 'success');
+        toast('Job saved to your shortlist!', 'success', {
+            label: 'View Saved',
+            onClick: () => showTab('saved-tab'),
+        });
         await refreshApplications();
+        // If currently on saved view or filter, refresh jobs
+        if (store.state.jobView === 'saved') {
+            setJobs({ jobView: 'saved' });
+        }
     } catch (err) {
         toast(err.message, 'error');
+    } finally {
+        setBusy(button, false);
+    }
+}
+
+async function unsaveJob(button, jobId, appId) {
+    setBusy(button, true, '');
+    try {
+        let targetAppId = appId;
+        if (!targetAppId) {
+            const app = (store.state.applications || []).find((a) => a.job_id === jobId && a.status === 'SAVED');
+            targetAppId = app?.id;
+        }
+        if (!targetAppId) {
+            return toast('Could not locate saved record for this job', 'warn');
+        }
+        await api.updateApplication(targetAppId, { status: 'DISMISSED' });
+        toast('Removed from saved jobs', 'info');
+        await refreshApplications();
+        if (store.state.jobView === 'saved') {
+            setJobs({ jobView: 'saved' });
+        }
+    } catch (err) {
+        toast(err.message, 'error');
+    } finally {
         setBusy(button, false);
     }
 }

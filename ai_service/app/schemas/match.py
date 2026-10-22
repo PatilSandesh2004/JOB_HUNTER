@@ -16,6 +16,9 @@ class MatchResult(BaseModel):
     missing_skills: list[str] = Field(default_factory=list, description="Required skills not in your profile")
     missing_preferred: list[str] = Field(default_factory=list, description="Nice-to-have skills not in your profile")
     passed_hard_filters: bool = True
+    experience_fit: str = Field(
+        default="unknown", description="fits / too_senior / too_junior / unknown, against the wanted range"
+    )
     confidence: str = Field(default="MEDIUM", description="HIGH / MEDIUM / LOW: how much the posting told us")
     ai_verdict: str | None = Field(default=None, description="strong / possible / weak / no, from the AI review")
     ai_reason: str | None = None

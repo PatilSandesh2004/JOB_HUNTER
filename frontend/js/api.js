@@ -184,6 +184,11 @@ export const api = {
     updateApplication: (id, patch) => request(`/applications/${id}`, { method: 'PATCH', body: patch }),
     approveApplication: (id) => request(`/applications/${id}/approve`, { method: 'POST' }),
     refillApplication: (id) => request(`/applications/${id}/refill`, { method: 'POST' }),
+    // Auto-apply related endpoints
+    startAutoApply: (jobId) => request('/auto-apply/start?job_id=' + encodeURIComponent(jobId), { method: 'POST' }),
+    submitCaptcha: (applicationId, questionId, token) => request('/auto-apply/captcha', { method: 'POST', body: { application_id: applicationId, question_id: questionId, token } }),
+    submitAnswer: (applicationId, questionId, answer, remember = true) =>
+        request('/auto-apply/answer', { method: 'POST', body: { application_id: applicationId, question_id: questionId, answer, remember } }),
     answerApplicationQuestion: (id, label, answer, remember) => 
         request(`/applications/${id}/answer`, { method: 'POST', body: { label, answer, remember } }),
     screenshotUrl: (id) => blobUrl(`/applications/${id}/screenshot`),

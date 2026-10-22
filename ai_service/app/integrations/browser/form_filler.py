@@ -142,7 +142,19 @@ _CONFIRMATION_RE = re.compile(
     r"we('ve| have) received your application|successfully (submitted|applied)",
     re.I,
 )
-_CAPTCHA_FRAME_RE = re.compile(r"hcaptcha\.com|challenges\.cloudflare\.com|recaptcha/api2/(anchor|bframe)", re.I)
+_CAPTCHA_FRAME_RE = re.compile(
+    r"hcaptcha\.com|challenges\.cloudflare\.com|recaptcha/api2/(anchor|bframe)|"
+    r"recaptcha/enterprise|arkoselabs\.com|funcaptcha|geetest\.com|awswaf|captcha-delivery\.com",
+    re.I,
+)
+_CAPTCHA_ERROR_RE = re.compile(
+    r"please (verify|confirm) (that )?you are human|"
+    r"verification (failed|required|expired)|"
+    r"captcha (required|validation failed|verification failed|is invalid|check failed)|"
+    r"please complete the (captcha|security check|verification)|"
+    r"press and hold|slide to (complete|verify)",
+    re.I,
+)
 _APPLY_BUTTON_RE = re.compile(r"^\s*(apply( for this (job|position|role))?( now)?|i'?m interested)\s*$", re.I)
 _SUBMIT_BUTTON_RE = re.compile(r"submit( (my |your )?application)?|send application|^\s*apply\s*$", re.I)
 
@@ -504,6 +516,30 @@ class _FormFillSession:
         result.screenshot_path = self._saved_screenshot()
         result.final_url = page.url
 
+        # Check if a CAPTCHA appeared or was triggered upon clicking submit
+        post_captcha = await self._captcha_visible(page)
+        if post_captcha:
+            result.captcha_detected = True
+            result.outcome = FillOutcome.NEEDS_MANUAL
+            result.message = "CAPTCHA verification appeared upon submission; submit this one yourself."
+            self._event("CAPTCHA appeared after submit", "Verification challenge triggered", shot)
+            return result
+
+        # Check for CAPTCHA error or verification required banners on the page
+        for candidate in [page.main_frame, *page.frames]:
+            try:
+                body = await candidate.locator("body").inner_text(timeout=3000)
+            except Exception:
+                continue
+            err_match = _CAPTCHA_ERROR_RE.search(body)
+            if err_match:
+                result.captcha_detected = True
+                result.outcome = FillOutcome.NEEDS_MANUAL
+                result.message = f"CAPTCHA verification required: {err_match.group(0)}"
+                self._event("CAPTCHA error detected", err_match.group(0), shot)
+                return result
+
+        # Only check for confirmation if no captcha challenge was triggered
         for candidate in [page.main_frame, *page.frames]:
             try:
                 body = await candidate.locator("body").inner_text(timeout=3000)
@@ -526,6 +562,7 @@ class _FormFillSession:
 
     @staticmethod
     async def _captcha_visible(page: Any) -> bool:
+        # 1. Check third-party and vendor CAPTCHA iframes
         for frame in page.frames:
             if _CAPTCHA_FRAME_RE.search(frame.url or "") and "size=invisible" not in (frame.url or ""):
                 try:
@@ -535,6 +572,30 @@ class _FormFillSession:
                         return True
                 except Exception:
                     return True
+
+        # 2. Check DOM elements, classes, and attributes on all frames
+        captcha_selectors = [
+            ".g-recaptcha",
+            ".h-captcha",
+            ".cf-turnstile",
+            "[data-sitekey]",
+            "iframe[src*='captcha' i]",
+            "iframe[src*='challenge' i]",
+            "iframe[title*='recaptcha' i]",
+            "input[name*='captcha' i]",
+            "div[id*='captcha' i]",
+        ]
+        for candidate in [page.main_frame, *page.frames]:
+            for sel in captcha_selectors:
+                try:
+                    locator = candidate.locator(sel).first
+                    if await locator.count() > 0:
+                        box = await locator.bounding_box()
+                        if box and box["width"] > 10 and box["height"] > 10:
+                            return True
+                except Exception:
+                    continue
+
         return False
 
     async def _screenshot(self, page: Any, step: str) -> str | None:

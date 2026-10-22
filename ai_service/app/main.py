@@ -20,6 +20,7 @@ from ai_service.app.api.routes import (
     saved_searches,
     screening,
     search,
+    auto_apply,
 )
 from ai_service.app.core.config import REPO_ROOT, settings
 from ai_service.app.core.errors import JobPilotError, LLMUnavailableError, NotFoundError, ResumeParseError
@@ -74,6 +75,7 @@ async def handle_domain_error(_: Request, exc: JobPilotError) -> JSONResponse:
 app.include_router(health.router, prefix=settings.api_v1_prefix)
 for module in (search, saved_searches, jobs, candidates, applications, screening, boards, inbox):
     app.include_router(module.router, prefix=settings.api_v1_prefix, dependencies=[Depends(require_token)])
+app.include_router(auto_apply.router, prefix=settings.api_v1_prefix, dependencies=[Depends(require_token)])
 
 # The Go gateway is the primary UI host; serving it here too lets the AI service run standalone.
 FRONTEND_DIR = REPO_ROOT / "frontend"

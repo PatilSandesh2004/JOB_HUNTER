@@ -158,3 +158,26 @@ async def test_screening_questions_are_reported_then_answered_from_the_bank(pack
     steps = [e["step"] for e in second.events]
     assert steps[-2:] == ["Clicked Submit", "Confirmation received"]
     assert (tmp_path / "b-submitted.png").exists()
+
+
+async def test_captcha_blocks_auto_submit(packet, tmp_path):
+    with FixtureSite() as site:
+        result = await fill_application(
+            f"{site.base}/apply-captcha", packet, submit=True, screenshot_path=tmp_path / "c.png"
+        )
+        assert site.submissions == []  # submission is blocked before click
+    assert result.outcome == FillOutcome.NEEDS_MANUAL
+    assert result.captcha_detected is True
+    assert "CAPTCHA" in result.message
+
+
+async def test_post_submit_captcha_challenge_blocks_applied(packet, tmp_path):
+    with FixtureSite() as site:
+        result = await fill_application(
+            f"{site.base}/apply-post-captcha", packet, submit=True, screenshot_path=tmp_path / "p.png"
+        )
+    # Even if form was submitted over HTTP, captcha challenge appeared post-submit
+    assert result.outcome == FillOutcome.NEEDS_MANUAL
+    assert result.captcha_detected is True
+    assert "CAPTCHA" in result.message
+

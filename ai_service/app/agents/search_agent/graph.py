@@ -33,10 +33,14 @@ from ai_service.app.services.jobs.location_service import CITIES, LocationFit, L
 from ai_service.app.services.jobs.normalization_service import JobNormalizationService
 from ai_service.app.services.matching.feedback import FeedbackModel
 from ai_service.app.services.matching.matching_engine import (
+    FITS,
+    TOO_JUNIOR,
+    TOO_SENIOR,
     MatchingEngineService,
     candidate_skill_profile,
     default_band,
     experience_band,
+    experience_fit,
     title_seniority_conflict,
 )
 from ai_service.app.services.matching.reviewer import JobReviewer
@@ -218,6 +222,7 @@ class _Filters:
     titles: list[str]
     band: tuple[float, float | None] | None
     years: float | None
+    strict: bool
     blocked: set[str]
     home_countries: set[str]
     location: LocationMatcher
@@ -230,17 +235,19 @@ class _Filters:
         if max(role_similarity(t, job.title, skills) for t in self.titles) < RELEVANCE_THRESHOLD:
             return "unrelated role"
         if self.band is not None or self.years is not None:
-            low, high = self.band if self.band is not None else (0.0, None)
-            ceiling = low if high is None else high
-            required, required_max = job.experience_required, job.experience_max
             if title_seniority_conflict(job.title, self.band, self.years):
                 return "seniority mismatch"
-            if required is not None and required > ceiling + 0.5:
+            fit = experience_fit(
+                job.experience_required,
+                job.experience_max,
+                self.band,
+                strict=self.strict,
+            )
+            if fit == TOO_SENIOR:
                 return "needs more experience"
-            if low >= 2 and required_max is not None and required_max < low - 1:
+            if fit == TOO_JUNIOR:
                 return "too junior"
-            if low >= 2 and required is not None and required_max is None and 0 < required < low - 2:
-                return "too junior"
+            # UNKNOWN postings pass – we don't drop what we can't measure
         if job.company.strip().lower() in self.blocked:
             return "company you hid"
         if self.request.remote_only and job.workplace_type not in (WorkplaceType.REMOTE, WorkplaceType.UNKNOWN):
@@ -454,11 +461,13 @@ class SearchAgent:
             if candidate and candidate.location
             else set()
         )
+        exp_mode = getattr(request, "experience_mode", "strict") or "strict"
         filters = _Filters(
             request=request,
             titles=state.get("titles") or state["roles"],
             band=experience_band(effective_experience(request, candidate)),
             years=candidate.years_of_experience if candidate and candidate.years_of_experience else None,
+            strict=(exp_mode == "strict"),
             blocked={c.strip().lower() for c in (candidate.preferences.blocked_companies if candidate else []) if c},
             home_countries=home,
             location=LocationMatcher.from_preferences(locations),

@@ -5,13 +5,18 @@ import { openModal, closeModal, esc, setBusy, toast } from '../utils.js';
 
 let activeQuestionAppId = null;
 let activeQuestionLabel = null;
+let dismissedQuestions = new Set();
 
 export function checkAgentQuestions(applications) {
-    // Find the first application that needs input
-    const app = applications.find(a => a.status === 'NEEDS_INPUT' && a.questions?.length > 0);
+    // Find the first application that needs input, skipping those whose current question was dismissed
+    const app = applications.find(a => {
+        if (a.status !== 'NEEDS_INPUT' || !a.questions?.length) return false;
+        return !dismissedQuestions.has(`${a.id}::${a.questions[0].label}`);
+    });
     
     if (app) {
         const question = app.questions[0];
+
         // If we are already showing this exact question, don't interrupt
         if (activeQuestionAppId === app.id && activeQuestionLabel === question.label && document.getElementById('agent-chat-modal')) return;
         
@@ -72,7 +77,13 @@ function showQuestionModal(app, question) {
         </div>
     `;
 
-    openModal(title, bodyHtml);
+    openModal(title, bodyHtml, {
+        onClose: () => {
+            dismissedQuestions.add(`${app.id}::${question.label}`);
+            activeQuestionAppId = null;
+            activeQuestionLabel = null;
+        }
+    });
 
     // If it's a modal, we need to add event listeners after rendering
     setTimeout(() => {

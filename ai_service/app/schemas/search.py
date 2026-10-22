@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -14,6 +15,11 @@ class SearchQueryRequest(BaseModel):
     )
     remote_only: bool = False
     experience: str = Field(default="ANY", description="Experience filter range e.g. 0-2, 1-3, 2-4, 3-5, 4-6, 5-8, 8+")
+    experience_mode: Literal["strict", "flexible"] = Field(
+        default="strict",
+        description="strict: postings must sit inside the chosen range ('3-5 yrs' is not 1-3); "
+        "flexible: only the posting's minimum has to fit",
+    )
     posted_within: str = Field(default="any", description="Date posted filter: any, 24h, 7d, 30d")
     sponsorship_required: bool = Field(default=False, description="Drop jobs that explicitly refuse sponsorship")
     strict_location: bool = Field(default=True, description="Drop jobs outside the requested locations")

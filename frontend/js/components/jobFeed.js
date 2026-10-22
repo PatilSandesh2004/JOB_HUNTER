@@ -10,6 +10,7 @@ const FILTERS = {
     remote: ({ job }) => job.workplace_type === 'REMOTE',
     visa: ({ job }) => job.visa_sponsorship.status === 'YES',
     salary: ({ job }) => job.salary_min != null || job.salary_max != null,
+    saved: (item, ctx) => ctx.savedJobIds && ctx.savedJobIds.has(item.job.id),
     new: (item, ctx) => isNew(item.job, ctx.lastVisit),
 };
 
@@ -34,14 +35,16 @@ function matchesQuery({ job }, query) {
 }
 
 /** The jobs to show, filtered and sorted. */
-export function visibleJobs({ jobs, jobFilter, jobSort, jobQuery, lastVisit }) {
+export function visibleJobs({ jobs, applications = [], jobFilter, jobSort, jobQuery, lastVisit }) {
     const filter = FILTERS[jobFilter] || FILTERS.all;
-    return jobs
-        .filter((item) => filter(item, { lastVisit }) && matchesQuery(item, jobQuery))
+    const savedJobIds = new Set(applications.filter((a) => a.status === 'SAVED').map((a) => a.job_id));
+    return (jobs || [])
+        .filter((item) => filter(item, { lastVisit, savedJobIds }) && matchesQuery(item, jobQuery))
         .sort(SORTS[jobSort] || SORTS.match);
 }
 
 export function renderJobFeed(container, state) {
+    if (!container) return;
     const { jobs, applications, profile, visibleCount = PAGE_SIZE, lastVisit } = state;
     const visible = visibleJobs(state);
     if (!visible.length) {
@@ -56,6 +59,64 @@ export function renderJobFeed(container, state) {
     const more = visible.length - shown.length;
     container.innerHTML = shown.map((item) => jobCard(item, appByJob.get(item.job.id), Boolean(profile), lastVisit)).join('')
         + (more > 0 ? `<div class="load-more"><button class="btn-secondary" data-action="show-more-jobs">Show ${Math.min(more, PAGE_SIZE)} more (${more} left)</button></div>` : '');
+}
+
+export function renderSavedJobsFeed(container, state, options = {}) {
+    if (!container) return;
+    const { allJobs = [], applications = [], profile, lastVisit } = state;
+    const { query = '', sort = 'newest' } = options;
+
+    const savedApps = applications.filter((a) => a.status === 'SAVED');
+    if (!savedApps.length) {
+        container.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">
+            <i class="fa-regular fa-bookmark" style="font-size: 2.5rem; color: var(--primary); margin-bottom: 0.75rem;"></i>
+            <h3>No Saved Jobs Yet</h3>
+            <p>Click the <strong>Bookmark (Save)</strong> button on any job card to save it to your shortlist here.</p>
+            <button class="btn-primary btn-sm" data-action="goto-jobs" style="margin-top: 1rem;">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> Explore Recommended Jobs
+            </button>
+        </div>`;
+        return;
+    }
+
+    const appByJob = new Map(savedApps.map((a) => [a.job_id, a]));
+    // Collect job entries
+    let savedItems = allJobs.filter((item) => appByJob.has(item.job.id));
+
+    // If query is provided
+    if (query) {
+        const q = query.toLowerCase();
+        savedItems = savedItems.filter(({ job }) => {
+            const str = [job.title, job.company, job.location, ...(job.required_skills || [])].join(' ').toLowerCase();
+            return str.includes(q);
+        });
+    }
+
+    // Sort saved items
+    if (sort === 'salary') {
+        savedItems.sort((a, b) => (b.job.salary_max ?? b.job.salary_min ?? -1) - (a.job.salary_max ?? a.job.salary_min ?? -1));
+    } else if (sort === 'company') {
+        savedItems.sort((a, b) => a.job.company.localeCompare(b.job.company));
+    } else if (sort === 'match') {
+        savedItems.sort((a, b) => (b.match?.overall_match ?? -1) - (a.match?.overall_match ?? -1));
+    } else {
+        // default newest saved
+        savedItems.sort((a, b) => {
+            const appA = appByJob.get(a.job.id);
+            const appB = appByJob.get(b.job.id);
+            return new Date(appB?.created_at || 0).getTime() - new Date(appA?.created_at || 0).getTime();
+        });
+    }
+
+    if (!savedItems.length) {
+        container.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">
+            <i class="fa-solid fa-filter"></i>
+            <p>No saved jobs match "${esc(query)}".</p>
+        </div>`;
+        return;
+    }
+
+    container.innerHTML = savedItems.map((item) => jobCard(item, appByJob.get(item.job.id), Boolean(profile), lastVisit)).join('');
 }
 
 const CURRENCY = { INR: '₹', USD: '$', EUR: '€', GBP: '£', CAD: 'C$', AUD: 'A$', SGD: 'S$' };
@@ -118,17 +179,39 @@ function jobCard({ job, match }, application, hasProfile, lastVisit) {
         ? `<details class="reasons"><summary>Why this score</summary><ul>${match.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></details>`
         : '';
 
+    const isSaved = application && application.status === 'SAVED';
+    const cardClass = [
+        'job-card',
+        match && !match.passed_hard_filters ? 'filtered' : '',
+        isSaved ? 'is-bookmarked' : ''
+    ].filter(Boolean).join(' ');
+
+    const bookmarkBtn = `
+        <button class="btn-bookmark-toggle ${isSaved ? 'is-saved' : ''}" 
+                data-action="${isSaved ? 'unsave-job' : 'save-job'}" 
+                data-job-id="${esc(job.id)}" 
+                data-app-id="${application ? esc(application.id) : ''}"
+                title="${isSaved ? 'Remove from Saved Jobs' : 'Save to shortlist'}" 
+                aria-label="${isSaved ? 'Remove from Saved' : 'Save Job'}">
+            <i class="fa-${isSaved ? 'solid' : 'regular'} fa-bookmark"></i>
+            <span>${isSaved ? 'Saved' : 'Save'}</span>
+        </button>
+    `;
+
     return `
-    <article class="job-card${match && !match.passed_hard_filters ? ' filtered' : ''}" data-job-id="${esc(job.id)}">
+    <article class="${cardClass}" data-job-id="${esc(job.id)}">
         <div>
             <div class="job-card-header">
                 <div>
                     <h3 class="job-title"><a href="${esc(safeUrl(job.application_url))}" target="_blank" rel="noopener noreferrer">${esc(job.title)}</a></h3>
                     <div class="job-company"><i class="fa-solid fa-building"></i> ${esc(job.company)} &bull; <i class="fa-solid fa-location-dot"></i> ${esc(job.location)}</div>
                 </div>
-                <span class="match-score-pill ${scoreClass}" title="${hasProfile ? 'Overall match score' : 'Add a profile to calculate score'}">
-                    ${score === null ? 'Not scored' : `<i class="fa-solid fa-bolt"></i> ${score}%`}
-                </span>
+                <div style="display:flex; align-items:center; gap:0.6rem;">
+                    ${bookmarkBtn}
+                    <span class="match-score-pill ${scoreClass}" title="${hasProfile ? 'Overall match score' : 'Add a profile to calculate score'}">
+                        ${score === null ? 'Not scored' : `<i class="fa-solid fa-bolt"></i> ${score}%`}
+                    </span>
+                </div>
             </div>
             <div class="job-tags">${tags}</div>
             ${match?.ai_reason ? `<p class="ai-reason"><i class="fa-solid fa-robot"></i> ${esc(match.ai_reason)}</p>` : ''}
@@ -162,13 +245,15 @@ function hideButtons(job) {
     return `<span class="hide-controls">
         <button class="btn-ghost btn-sm" data-action="hide-job" data-job-id="${esc(job.id)}" title="Not interested: hide this job" aria-label="Not interested"><i class="fa-solid fa-eye-slash"></i></button>
         <button class="btn-ghost btn-sm" data-action="block-company" data-company="${esc(job.company)}" title="Hide all jobs from ${esc(job.company)}" aria-label="Hide company"><i class="fa-solid fa-ban"></i></button>
-        <button class="btn-ghost btn-sm" data-action="save-job" data-job-id="${esc(job.id)}" title="Save to apply later (Applications board)" aria-label="Save job"><i class="fa-regular fa-bookmark"></i></button>
     </span>`;
 }
 
 function footer(job, application, hasProfile) {
     if (!application) return `${hideButtons(job)}<span class="footer-actions">${footerActions(job, hasProfile)}</span>`;
-    return footerActions(job, hasProfile, application);
+    return `<span class="hide-controls">
+        <button class="btn-ghost btn-sm" data-action="hide-job" data-job-id="${esc(job.id)}" title="Not interested: hide this job" aria-label="Not interested"><i class="fa-solid fa-eye-slash"></i></button>
+        <button class="btn-ghost btn-sm" data-action="block-company" data-company="${esc(job.company)}" title="Hide all jobs from ${esc(job.company)}" aria-label="Hide company"><i class="fa-solid fa-ban"></i></button>
+    </span><span class="footer-actions">${footerActions(job, hasProfile, application)}</span>`;
 }
 
 function footerActions(job, hasProfile, application = null) {
@@ -180,7 +265,7 @@ function footerActions(job, hasProfile, application = null) {
         return `<span class="muted">Add your profile to apply</span>
                 <button class="btn-secondary btn-sm" data-action="goto-profile">Set up Profile</button>`;
     }
-    const saved = application ? '<span class="tag subtle"><i class="fa-solid fa-bookmark"></i> saved</span>' : '';
+    const saved = application ? '<span class="tag tag-saved"><i class="fa-solid fa-bookmark"></i> In Shortlist</span>' : '';
     const check = `<button class="btn-ghost btn-sm" data-action="resume-check" data-job-id="${esc(job.id)}" title="How well your resume fits this job">
                 <i class="fa-solid fa-file-circle-check"></i> Resume check</button>`;
     const contacts = `<button class="btn-ghost btn-sm" data-action="get-insiders" data-job-id="${esc(job.id)}" data-company="${esc(job.company)}" data-job-title="${esc(job.title)}" title="Find recruiters and people you know at ${esc(job.company)}">
