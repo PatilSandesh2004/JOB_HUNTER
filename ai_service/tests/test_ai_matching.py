@@ -4,17 +4,20 @@ from datetime import UTC, datetime
 
 import numpy as np
 
+from ai_service.app.agents.search_agent.graph import SearchAgent
 from ai_service.app.database.session import AsyncSessionLocal
 from ai_service.app.models.application import ApplicationModel
 from ai_service.app.repositories.job_repository import JobRepository
 from ai_service.app.schemas.candidate import CandidateProfile
 from ai_service.app.schemas.job import NormalizedJob
 from ai_service.app.schemas.match import JobWithMatch, MatchResult
+from ai_service.app.schemas.search import SearchQueryRequest
 from ai_service.app.services.matching.feedback import FeedbackModel
 from ai_service.app.services.matching.matching_engine import MatchingEngineService
+from ai_service.app.services.matching.reranker import apply_rerank, search_query
 from ai_service.app.services.matching.reviewer import JobReviewer, carry_over, profile_fingerprint
 from ai_service.app.services.matching.semantic import SemanticMatcher, calibrate
-from ai_service.tests.fakes import RESUME
+from ai_service.tests.fakes import RESUME, FakeSearchService, offline_llm
 
 CANDIDATE = CandidateProfile(name="Asha", current_role="AI Engineer", years_of_experience=2, skills=["Python", "LLMs"])
 
@@ -143,3 +146,25 @@ async def test_feedback_from_hidden_and_applied_jobs(client):
 def test_feedback_needs_a_few_examples():
     model = FeedbackModel()
     assert not model.active and model.adjust(_job("x", "AI Engineer")) == (0.0, None)
+
+
+def test_rerank_blends_relevance_and_keeps_failed_jobs_capped():
+    passed = apply_rerank(MatchResult(job_id="a", overall_match=70.0), 20.0)
+    assert passed.overall_match == 60.0 and passed.rerank_match == 20.0
+    failed = apply_rerank(MatchResult(job_id="b", overall_match=30.0, passed_hard_filters=False), 100.0)
+    assert failed.overall_match == 30.0
+    assert search_query(["ML Engineer"], "2-3", None) == "ML Engineer, 2-3 years of experience"
+
+
+async def test_reranker_reorders_top_results(candidate):
+    class StubReranker:
+        ready, top_n = True, 50
+
+        async def scores(self, query, jobs):
+            return {j.id: (100.0 if j.company == "Remote First Inc" else 0.0) for j in jobs}
+
+    agent = SearchAgent(FakeSearchService(), offline_llm(), reranker=StubReranker())
+    response = await agent.run(SearchQueryRequest(roles=["Backend Engineer"], strict_location=False), candidate)
+    assert all(r.match.rerank_match is not None for r in response.results)
+    scores = [r.match.overall_match for r in response.results]
+    assert scores == sorted(scores, reverse=True)

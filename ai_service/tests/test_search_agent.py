@@ -1,7 +1,7 @@
 import pytest
 
 from ai_service.app.agents.search_agent.graph import SearchAgent, SearchInputError, build_base_queries, resolve_targets
-from ai_service.app.schemas.search import SearchQueryRequest
+from ai_service.app.schemas.search import RawJobPosting, SearchQueryRequest
 from ai_service.tests.fakes import FakeSearchService, offline_llm
 
 
@@ -66,3 +66,26 @@ async def test_runs_without_candidate():
     response = await agent.run(SearchQueryRequest(roles=["Engineer"], strict_location=False), None)
     assert response.total_results == 5  # every engineering job; the accountant is unrelated
     assert all(r.match is None for r in response.results)
+
+
+async def test_chosen_experience_hides_jobs_asking_more_or_not_saying(candidate):
+    def posting(n, company, snippet):
+        url = f"https://jobs.lever.co/{company.lower()}/0b9f5c1e-1111-2222-3333-00000000000{n}"
+        return RawJobPosting(title="Backend Engineer", url=url, snippet=snippet, company=company, source="searxng")
+
+    postings = [
+        posting(1, "Acme", "Python, FastAPI. 2-3 years of experience."),
+        posting(2, "Globex", "Python Developer 5 to 7 Yrs Pune"),
+        posting(3, "Initech", "Seniority level Mid-Senior level. Python."),
+        posting(4, "Umbrella", "Python and PostgreSQL."),  # does not say
+    ]
+    agent = SearchAgent(FakeSearchService(postings), offline_llm())
+    request = SearchQueryRequest(roles=["Backend Engineer"], experience="2-3", strict_location=False)
+    response = await agent.run(request, candidate)
+    assert titles(response) == {"Backend Engineer @ Acme"}
+    assert response.filtered_out["needs more experience"] == 2
+    assert response.filtered_out["experience not stated"] == 1
+
+    # With "Any experience" the posting that does not say is kept.
+    response = await agent.run(SearchQueryRequest(roles=["Backend Engineer"], strict_location=False), candidate)
+    assert "Backend Engineer @ Umbrella" in titles(response)

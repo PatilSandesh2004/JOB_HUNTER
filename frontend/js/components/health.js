@@ -28,6 +28,13 @@ export function renderHealth(container, health, error) {
         }[c.semantic.status] || c.semantic.status;
         cards.push(card('Resume similarity (local AI)', c.semantic.ok, status));
     }
+    if (c.reranker) {
+        const status = {
+            ready: c.reranker.model, loading: 'Loading the model (first start downloads ~80 MB)…',
+            off: 'Turned off (RERANKER_ENABLED=false)', unavailable: 'Could not load the model; ranking without it',
+        }[c.reranker.status] || c.reranker.status;
+        cards.push(card('Search re-ranker (local AI)', c.reranker.ok, status));
+    }
     if (c.browser) {
         const mode = c.browser.headless ? 'Chromium (headless)' : 'Chromium (visible)';
         cards.push(card('Browser agent', c.browser.ok, c.browser.ok ? mode : c.browser.detail));

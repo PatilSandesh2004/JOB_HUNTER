@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # Resume-to-description similarity with a local embedding model (downloaded once into data/models)
     semantic_matching: bool = True
     semantic_model: str = "BAAI/bge-small-en-v1.5"
+    # Re-ranking of each search's best matches with a small local cross-encoder (downloaded once into data/models)
+    reranker_enabled: bool = True
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    reranker_top_n: int = 50
 
     # Browser automation
     browser_headless: bool = True

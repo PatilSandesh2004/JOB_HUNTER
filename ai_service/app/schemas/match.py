@@ -12,6 +12,7 @@ class MatchResult(BaseModel):
     location_match: float = 0.0
     sponsorship_match: float = 0.0
     semantic_match: float | None = Field(default=None, description="Resume-to-description similarity, when computed")
+    rerank_match: float | None = Field(default=None, description="Cross-encoder relevance to the search, when computed")
     matched_skills: list[str] = Field(default_factory=list)
     missing_skills: list[str] = Field(default_factory=list, description="Required skills not in your profile")
     missing_preferred: list[str] = Field(default_factory=list, description="Nice-to-have skills not in your profile")

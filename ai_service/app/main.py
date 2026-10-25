@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from ai_service.app.api.deps import get_application_service, get_semantic_matcher, get_task_runner
+from ai_service.app.api.deps import get_application_service, get_reranker, get_semantic_matcher, get_task_runner
 from ai_service.app.api.routes import (
     applications,
     boards,
@@ -50,9 +50,11 @@ async def lifespan(_: FastAPI):
     await runner.start()
     # Load the local embedding model in the background (downloads it once); searches work meanwhile.
     warm_up = asyncio.create_task(get_semantic_matcher().warm_up(), name="jobpilot-semantic-warm-up")
+    warm_up_reranker = asyncio.create_task(get_reranker().warm_up(), name="jobpilot-reranker-warm-up")
     logger.info("JobPilot AI service ready (SearXNG: %s, LLM: %s)", settings.searxng_url, settings.llm_enabled)
     yield
     warm_up.cancel()
+    warm_up_reranker.cancel()
     await runner.stop()
 
 
