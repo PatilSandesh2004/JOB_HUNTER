@@ -42,7 +42,10 @@ THANKS = "<html><body><h1>Thank you for applying!</h1><p>We have received your a
 
 
 CAPTCHA_FORM = FORM.format(extra='<div class="g-recaptcha" style="width:100px; height:100px;"></div>')
-CAPTCHA_ERROR_PAGE = "<html><body><h1>Verification Required</h1><p>Please confirm that you are human.</p><div class='g-recaptcha' style='width:100px; height:100px;'></div></body></html>"
+CAPTCHA_ERROR_PAGE = (
+    "<html><body><h1>Verification Required</h1><p>Please confirm that you are human.</p>"
+    "<div class='g-recaptcha' style='width:100px; height:100px;'></div></body></html>"
+)
 
 
 class _Handler(BaseHTTPRequestHandler):

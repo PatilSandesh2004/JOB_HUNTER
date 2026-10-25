@@ -312,7 +312,13 @@ class AdzunaFeed(Feed):
             for place in places
             for page in (1, 2, 3)
         ]
-        results = await asyncio.gather(*(self._get_json(client, f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}", p) for page, p in requests), return_exceptions=True)
+        results = await asyncio.gather(
+            *(
+                self._get_json(client, f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}", p)
+                for page, p in requests
+            ),
+            return_exceptions=True,
+        )
         postings: dict[str, RawJobPosting] = {}
         for data in results:
             if isinstance(data, BaseException):

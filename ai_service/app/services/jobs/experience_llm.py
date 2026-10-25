@@ -30,7 +30,8 @@ _USER = """For each posting, return the required experience.
 POSTINGS
 {postings}
 
-Return {{"jobs": [{{"id": <id>, "min_years": <number or null>, "max_years": <number or null>, "quote": <the words from the posting that state it, or null>}}, ...]}}."""
+Return {{"jobs": [{{"id": <id>, "min_years": <number or null>, "max_years": <number or null>,
+"quote": <the words from the posting that state it, or null>}}, ...]}}."""
 
 
 class ExperienceExtractor:

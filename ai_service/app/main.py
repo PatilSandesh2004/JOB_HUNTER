@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from ai_service.app.api.deps import get_application_service, get_reranker, get_semantic_matcher, get_task_runner
 from ai_service.app.api.routes import (
     applications,
+    auto_apply,
     boards,
     candidates,
     health,
@@ -20,7 +21,6 @@ from ai_service.app.api.routes import (
     saved_searches,
     screening,
     search,
-    auto_apply,
 )
 from ai_service.app.core.config import REPO_ROOT, settings
 from ai_service.app.core.errors import JobPilotError, LLMUnavailableError, NotFoundError, ResumeParseError
