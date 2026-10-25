@@ -36,6 +36,7 @@ from ai_service.app.services.matching.matching_engine import (
     FITS,
     TOO_JUNIOR,
     TOO_SENIOR,
+    UNKNOWN,
     MatchingEngineService,
     candidate_skill_profile,
     default_band,
@@ -43,6 +44,7 @@ from ai_service.app.services.matching.matching_engine import (
     experience_fit,
     title_seniority_conflict,
 )
+from ai_service.app.services.matching.reranker import Reranker, apply_rerank, search_query
 from ai_service.app.services.matching.reviewer import JobReviewer
 from ai_service.app.services.matching.roles import parse_title, related_titles, role_similarity
 from ai_service.app.services.matching.semantic import SemanticMatcher
@@ -223,6 +225,7 @@ class _Filters:
     band: tuple[float, float | None] | None
     years: float | None
     strict: bool
+    experience_chosen: bool  # the user picked a range, so postings that do not state one are hidden
     blocked: set[str]
     home_countries: set[str]
     location: LocationMatcher
@@ -243,11 +246,12 @@ class _Filters:
                 self.band,
                 strict=self.strict,
             )
+            if fit == UNKNOWN and self.experience_chosen:
+                return "experience not stated"
             if fit == TOO_SENIOR:
                 return "needs more experience"
             if fit == TOO_JUNIOR:
                 return "too junior"
-            # UNKNOWN postings pass – we don't drop what we can't measure
         if job.company.strip().lower() in self.blocked:
             return "company you hid"
         if self.request.remote_only and job.workplace_type not in (WorkplaceType.REMOTE, WorkplaceType.UNKNOWN):
@@ -280,6 +284,7 @@ class SearchAgent:
         matcher: MatchingEngineService | None = None,
         semantic: SemanticMatcher | None = None,
         reviewer: JobReviewer | None = None,
+        reranker: Reranker | None = None,
     ) -> None:
         self.search_service = search_service
         self.llm = llm
@@ -289,6 +294,7 @@ class SearchAgent:
         self.matcher = matcher or MatchingEngineService()
         self.semantic = semantic
         self.reviewer = reviewer
+        self.reranker = reranker
         self._plan_cache: dict[str, tuple[float, tuple[list[str], list[str], list[str]]]] = {}
         self.graph = self._build()
 
@@ -468,6 +474,7 @@ class SearchAgent:
             band=experience_band(effective_experience(request, candidate)),
             years=candidate.years_of_experience if candidate and candidate.years_of_experience else None,
             strict=(exp_mode == "strict"),
+            experience_chosen=experience_band(getattr(request, "experience", "ANY")) is not None,
             blocked={c.strip().lower() for c in (candidate.preferences.blocked_companies if candidate else []) if c},
             home_countries=home,
             location=LocationMatcher.from_preferences(locations),
@@ -506,6 +513,24 @@ class SearchAgent:
                 for r in results
             ]
             results.sort(key=lambda r: (r.match.passed_hard_filters, r.match.overall_match), reverse=True)
+            if self.reranker is not None and self.reranker.ready:
+                results = await self._rerank(state, results)
             if self.reviewer is not None:
-                results = await self.reviewer.review(candidate, results)
+                band = effective_experience(state["request"], candidate)
+                results = await self.reviewer.review(candidate, results, band if experience_band(band) else None)
         return {"results": results[: state["request"].max_results]}
+
+    async def _rerank(self, state: SearchAgentState, results: list[JobWithMatch]) -> list[JobWithMatch]:
+        """Re-score the top results with the cross-encoder and re-sort them; the rest keep their order."""
+        top, rest = results[: self.reranker.top_n], results[self.reranker.top_n :]
+        candidate = state.get("candidate")
+        query = search_query(state["roles"], effective_experience(state["request"], candidate), candidate)
+        scores = await self.reranker.scores(query, [r.job for r in top])
+        if not scores:
+            return results
+        top = [
+            JobWithMatch(job=r.job, match=apply_rerank(r.match, scores[r.job.id])) if r.job.id in scores else r
+            for r in top
+        ]
+        top.sort(key=lambda r: (r.match.passed_hard_filters, r.match.overall_match), reverse=True)
+        return [*top, *rest]

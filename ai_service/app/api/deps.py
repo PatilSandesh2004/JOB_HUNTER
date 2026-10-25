@@ -17,6 +17,7 @@ from ai_service.app.services.applications.tailoring_service import ApplicationTa
 from ai_service.app.services.inbox.inbox_service import InboxService
 from ai_service.app.services.jobs.enrichment_service import JobEnrichmentService
 from ai_service.app.services.jobs.recheck_service import JobRecheckService
+from ai_service.app.services.matching.reranker import Reranker
 from ai_service.app.services.matching.reviewer import JobReviewer
 from ai_service.app.services.matching.semantic import SemanticMatcher
 from ai_service.app.services.notifications.alerts import MatchAlertService
@@ -57,6 +58,11 @@ def get_semantic_matcher() -> SemanticMatcher:
 
 
 @lru_cache
+def get_reranker() -> Reranker:
+    return Reranker()
+
+
+@lru_cache
 def get_job_reviewer() -> JobReviewer:
     return JobReviewer(get_llm())
 
@@ -70,6 +76,7 @@ def get_search_agent() -> SearchAgent:
         enricher=JobEnrichmentService(),
         semantic=get_semantic_matcher(),
         reviewer=get_job_reviewer(),
+        reranker=get_reranker(),
     )
 
 

@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_service.app.api.deps import get_llm, get_searxng, get_semantic_matcher
+from ai_service.app.api.deps import get_llm, get_reranker, get_searxng, get_semantic_matcher
 from ai_service.app.core.config import settings
 from ai_service.app.database.session import get_db
 from ai_service.app.integrations.browser.runtime import browser_health
 from ai_service.app.integrations.llm.llm_client import LLMClient
 from ai_service.app.integrations.search.searxng_client import SearXNGClient
+from ai_service.app.services.matching.reranker import Reranker
 from ai_service.app.services.matching.semantic import SemanticMatcher
 
 router = APIRouter(tags=["health"])
@@ -19,6 +20,7 @@ async def health(
     llm: LLMClient = Depends(get_llm),
     searxng: SearXNGClient = Depends(get_searxng),
     semantic: SemanticMatcher = Depends(get_semantic_matcher),
+    reranker: Reranker = Depends(get_reranker),
 ) -> dict:
     try:
         await db.execute(text("SELECT 1"))
@@ -37,5 +39,6 @@ async def health(
             "llm": {"ok": llm.available, "model": llm.primary_model if llm.available else None},
             "browser": {"ok": browser["ok"], "detail": browser["detail"], "headless": settings.browser_headless},
             "semantic": {"ok": semantic.ready, "status": semantic.status, "model": settings.semantic_model},
+            "reranker": {"ok": reranker.ready, "status": reranker.status, "model": settings.reranker_model},
         },
     }

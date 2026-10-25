@@ -25,7 +25,7 @@ _SYSTEM = (
     "You are a meticulous technical recruiter. Judge each job's fit for the candidate strictly from the facts "
     "given; never assume skills or experience that are not stated. Respond with a JSON object only."
 )
-_USER = """Candidate: {role}, {years} years of experience. Wants: {targets} in {locations}.
+_USER = """Candidate: {role}, {years} years of experience. Wants: {targets} in {locations}{band}.
 Skills: {skills}
 Recent work:
 {work}
@@ -96,25 +96,30 @@ class JobReviewer:
     def remember(self, job_id: str, fingerprint: str, verdict: str, reason: str) -> None:
         self._cache[(job_id, fingerprint)] = (verdict, reason)
 
-    async def review(self, candidate: CandidateProfile, items: list[JobWithMatch]) -> list[JobWithMatch]:
-        """Review the top results (by current score); returns all items, re-sorted. Never raises."""
+    async def review(
+        self, candidate: CandidateProfile, items: list[JobWithMatch], experience: str | None = None
+    ) -> list[JobWithMatch]:
+        """Review the top results (by current score); returns all items, re-sorted. Never raises.
+
+        `experience`: the years range searched for (e.g. '2-3'); a job asking for more is judged not a fit."""
         if not self.available or not items:
             return items
         fingerprint = profile_fingerprint(candidate)
+        key = f"{fingerprint}:{experience}" if experience else fingerprint  # verdicts depend on the range
         top = [i for i in items if i.match and i.match.passed_hard_filters][: self.top_n]
-        todo = [i for i in top if self.cached(i.job.id, fingerprint) is None]
+        todo = [i for i in top if self.cached(i.job.id, key) is None]
         for start in range(0, len(todo), BATCH_SIZE):
             batch = todo[start : start + BATCH_SIZE]
             try:
-                verdicts = await self._ask(candidate, batch)
+                verdicts = await self._ask(candidate, batch, experience)
             except LLMUnavailableError as exc:
                 logger.warning("AI review skipped: %s", exc)
                 break
             for item, (verdict, reason) in verdicts.items():
-                self.remember(item, fingerprint, verdict, reason)
+                self.remember(item, key, verdict, reason)
         reviewed = []
         for item in items:
-            hit = self.cached(item.job.id, fingerprint) if item.match else None
+            hit = self.cached(item.job.id, key) if item.match else None
             reviewed.append(
                 JobWithMatch(job=item.job, match=apply_verdict(item.match, *hit, fingerprint)) if hit else item
             )
@@ -124,7 +129,9 @@ class JobReviewer:
         )
         return reviewed
 
-    async def _ask(self, candidate: CandidateProfile, batch: list[JobWithMatch]) -> dict[str, tuple[str, str]]:
+    async def _ask(
+        self, candidate: CandidateProfile, batch: list[JobWithMatch], experience: str | None = None
+    ) -> dict[str, tuple[str, str]]:
         lines = []
         for number, item in enumerate(batch, 1):
             job = item.job
@@ -143,6 +150,7 @@ class JobReviewer:
             years=f"{candidate.years_of_experience:g}",
             targets=", ".join(candidate.preferences.preferred_roles or [candidate.current_role or "similar roles"]),
             locations=", ".join(candidate.preferences.preferred_locations) or "any location",
+            band=f", only roles asking for {experience} years (a job asking for more is a no)" if experience else "",
             skills=", ".join(candidate.skills[:30]) or "not stated",
             work="\n".join(f"- {w.title} at {w.company}" for w in candidate.work_experience[:3]) or "- not stated",
             jobs="\n".join(lines),

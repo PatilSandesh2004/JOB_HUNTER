@@ -109,6 +109,15 @@ _MIN_RE = re.compile(
     + r"\s*(?:\+|plus)?\s*(?:or more\s+)?(?:years?|yrs?)\b",
     re.I,
 )
+# "Experience: 5-8", "Exp 5+": a labelled number needs no "years" after it.
+_LABELLED_RE = re.compile(
+    r"\b(?:experience|exp)\b\.?\s*(?:required|level)?\s*[:\-–]?\s*"
+    + _NUM
+    + r"(?:\s*(?:-|–|—|to)\s*"
+    + _NUM
+    + r"|\s*(\+|plus))(?!\s*(?:\d|%|k\b|lpa|lakhs?))",
+    re.I,
+)
 _EXPERIENCE_CONTEXT = re.compile(r"\b(experience|exp\b|experienced|background|track record|hands[- ]on)", re.I)
 _COMPANY_CONTEXT = re.compile(
     r"\b(founded|in business|we(?:'ve| have| are)\b|our (?:team|company|founders|leaders)|company has|history|ago\b|"
@@ -121,6 +130,13 @@ _ENTRY_LEVEL = re.compile(
     r"recent graduates?|graduate (?:program|role|engineer))\b",
     re.I,
 )
+# LinkedIn's "Seniority level" label, the only experience hint many LinkedIn snippets carry.
+_SENIORITY_LEVELS: list[tuple[re.Pattern[str], tuple[float, float | None]]] = [
+    (re.compile(r"\bmid[- ]senior level\b", re.I), (4.0, None)),
+    (re.compile(r"\bseniority level:?\s*(?:director|executive)\b", re.I), (10.0, None)),
+    (re.compile(r"\bseniority level:?\s*associate\b", re.I), (1.0, 3.0)),
+    (re.compile(r"\bseniority level:?\s*internship\b", re.I), (0.0, 1.0)),
+]
 
 
 @dataclass(frozen=True)
@@ -133,20 +149,25 @@ class ExperienceRequirement:
 def _statements(text: str) -> list[ExperienceRequirement]:
     text = _WORD_NUMBER_RE.sub(lambda m: str(_WORD_NUMBERS[m.group(1).lower()]), text)
     spans = section_spans(text)
-    found: list[tuple[int, int, float, float | None]] = []
+    found: list[tuple[int, int, float, float | None, bool]] = []  # (start, end, low, high, job-board style)
     for m in _RANGE_RE.finditer(text):
-        found.append((m.start(), m.end(), float(m.group(1)), float(m.group(2))))
+        found.append((m.start(), m.end(), float(m.group(1)), float(m.group(2)), True))
+    for m in _LABELLED_RE.finditer(text):
+        if not any(s <= m.start() < e or m.start() <= s < m.end() for s, e, *_ in found):
+            high = None if m.group(3) else float(m.group(2))
+            found.append((m.start(), m.end(), float(m.group(1)), high, True))
     taken = [(s, e) for s, e, *_ in found]
     for m in _MIN_RE.finditer(text):
         if not any(s <= m.start() < e for s, e in taken):
-            found.append((m.start(), m.end(), float(m.group(1)), None))
+            found.append((m.start(), m.end(), float(m.group(1)), None, bool(re.search(r"yrs?\b", m.group(0), re.I))))
 
     statements = []
-    for start, end, low, high in found:
+    for start, end, low, high, board_style in found:
         # Context stays within the sentence: "...for 12 years. Need 4+ years experience" is two statements.
         before = _SENTENCE_END.split(text[max(0, start - 70) : start])[-1]
         after = _SENTENCE_END.split(text[end : end + 70])[0]
-        if not (_EXPERIENCE_CONTEXT.search(after) or _EXPERIENCE_CONTEXT.search(before[-40:])):
+        # Job boards write the bare requirement ("5 to 7 Yrs", "3-5 years"); elsewhere it needs context.
+        if not (board_style or _EXPERIENCE_CONTEXT.search(after) or _EXPERIENCE_CONTEXT.search(before[-40:])):
             continue  # "a 10 year old company", "2 years of free coaching"
         if _COMPANY_CONTEXT.search(before[-45:]) or _COMPANY_CONTEXT.search(after[:25]):
             continue  # "we have been building for 15 years", "15 years ago"
@@ -170,6 +191,9 @@ def experience_range(text: str) -> tuple[float | None, float | None]:
         return main.min_years, main.max_years
     if _ENTRY_LEVEL.search(text):
         return 0.0, 1.0
+    for pattern, (low, high) in _SENIORITY_LEVELS:
+        if pattern.search(text):
+            return low, high
     return None, None
 
 

@@ -104,6 +104,14 @@ def test_candidate_free_text_skills():
         ("5+ years in software engineering experience, 2+ years with Kafka", (5, None)),
         ("Freshers can apply. Strong DSA.", (0, 1)),
         ("We offer 2 years of free coaching", (None, None)),
+        # Job-board snippets: bare ranges, labels without "years", LinkedIn seniority levels.
+        ("Python Developer 5 to 7 Yrs Pune", (5, 7)),
+        ("Job description 5-10 years Bengaluru Python Django", (5, 10)),
+        ("Data Scientist - Acme. Experience: 5-8. Bangalore", (5, 8)),
+        ("Exp 5+ Python", (5, None)),
+        ("Exp 3-5 LPA", (None, None)),
+        ("Seniority level Mid-Senior level Employment type Full-time", (4, None)),
+        ("Experience in 2023 projects", (None, None)),
     ],
 )
 def test_experience_range(text, expected):
