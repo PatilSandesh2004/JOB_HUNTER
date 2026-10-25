@@ -180,4 +180,3 @@ async def test_post_submit_captcha_challenge_blocks_applied(packet, tmp_path):
     assert result.outcome == FillOutcome.NEEDS_MANUAL
     assert result.captcha_detected is True
     assert "CAPTCHA" in result.message
-

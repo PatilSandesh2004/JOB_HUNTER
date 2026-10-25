@@ -33,7 +33,6 @@ from ai_service.app.services.jobs.location_service import CITIES, LocationFit, L
 from ai_service.app.services.jobs.normalization_service import JobNormalizationService
 from ai_service.app.services.matching.feedback import FeedbackModel
 from ai_service.app.services.matching.matching_engine import (
-    FITS,
     TOO_JUNIOR,
     TOO_SENIOR,
     UNKNOWN,

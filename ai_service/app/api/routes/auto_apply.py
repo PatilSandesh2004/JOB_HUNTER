@@ -29,6 +29,7 @@ router = APIRouter(prefix="/auto-apply", tags=["auto-apply"])
 # Schemas
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class StartRequest(BaseModel):
     job_id: str
     tailor_resume: bool | None = None
@@ -36,13 +37,13 @@ class StartRequest(BaseModel):
 
 class CaptchaSubmission(BaseModel):
     application_id: str
-    question_id: str   # the question label / id
+    question_id: str  # the question label / id
     token: str
 
 
 class AnswerSubmission(BaseModel):
     application_id: str
-    question_id: str   # the question label / field name
+    question_id: str  # the question label / field name
     answer: str
     remember: bool = True  # save to answer bank for future applications
 
@@ -50,6 +51,7 @@ class AnswerSubmission(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 # POST /auto-apply/start
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/start")
 async def start_auto_apply(
@@ -86,8 +88,8 @@ _TERMINAL = {
     ApplicationStatus.AWAITING_CONFIRMATION,
 }
 
-_POLL_INTERVAL = 2.0   # seconds between DB polls
-_TIMEOUT       = 900   # give up after 15 minutes
+_POLL_INTERVAL = 2.0  # seconds between DB polls
+_TIMEOUT = 900  # give up after 15 minutes
 
 
 def _sse(event: str, data: dict) -> str:
@@ -107,6 +109,7 @@ async def auto_apply_stream(
       complete – application submitted / done
       error    – terminal failure
     """
+
     async def event_generator():
         seen_questions: set[str] = set()
         prev_status: str | None = None
@@ -130,12 +133,12 @@ async def auto_apply_stream(
             if row.status != prev_status:
                 prev_status = row.status
                 friendly = {
-                    "PROCESSING":   "📋 Agent is filling the form…",
-                    "SUBMITTING":   "🚀 Submitting the application…",
-                    "NEEDS_INPUT":  "⏸  Agent paused – needs your input",
+                    "PROCESSING": "📋 Agent is filling the form…",
+                    "SUBMITTING": "🚀 Submitting the application…",
+                    "NEEDS_INPUT": "⏸  Agent paused – needs your input",
                     "PENDING_APPROVAL": "👀 Ready for your review",
-                    "APPLIED":      "✅ Application submitted!",
-                    "FAILED":       "❌ Application failed",
+                    "APPLIED": "✅ Application submitted!",
+                    "FAILED": "❌ Application failed",
                 }.get(row.status, row.status)
                 yield _sse("status", {"message": friendly})
 
@@ -145,12 +148,15 @@ async def auto_apply_stream(
                 label = q.get("label") or q.get("id") or str(q)
                 if label not in seen_questions:
                     seen_questions.add(label)
-                    yield _sse("question", {
-                        "id":         label,
-                        "text":       q.get("text") or q.get("label") or label,
-                        "field_type": q.get("field_type", "text"),
-                        "suggestion": q.get("suggestion") or q.get("ai_answer", ""),
-                    })
+                    yield _sse(
+                        "question",
+                        {
+                            "id": label,
+                            "text": q.get("text") or q.get("label") or label,
+                            "field_type": q.get("field_type", "text"),
+                            "suggestion": q.get("suggestion") or q.get("ai_answer", ""),
+                        },
+                    )
 
             # Emit answers when questions are resolved (question disappeared from list)
             resolved_labels = seen_questions - {(q.get("label") or q.get("id") or str(q)) for q in questions}
@@ -176,8 +182,8 @@ async def auto_apply_stream(
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control":     "no-cache",
-            "X-Accel-Buffering": "no",   # disable nginx buffering
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
         },
     )
 
@@ -185,8 +191,10 @@ async def auto_apply_stream(
 # Simple in-process cache to avoid re-emitting answer events (resets on restart, acceptable)
 _answered: dict[str, set[str]] = {}
 
+
 def _answered_cache(app_id: str) -> set[str]:
     return _answered.setdefault(app_id, set())
+
 
 def _mark_answered(app_id: str, label: str):
     _answered_cache(app_id).add(label)
@@ -195,6 +203,7 @@ def _mark_answered(app_id: str, label: str):
 # ──────────────────────────────────────────────────────────────────────────────
 # POST /auto-apply/captcha
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/captcha")
 async def submit_captcha(
@@ -215,13 +224,14 @@ async def submit_captcha(
         )
     except Exception as exc:
         logger.warning("captcha submit failed: %s", exc)
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "ok", "message": "CAPTCHA accepted – agent is resuming"}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # POST /auto-apply/answer
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/answer")
 async def submit_answer(
@@ -243,7 +253,7 @@ async def submit_answer(
         )
     except Exception as exc:
         logger.warning("answer submit failed for %s: %s", payload.application_id, exc)
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "status": "ok",
         "message": "Answer saved – agent is resuming" if not app.questions else "Answer saved",

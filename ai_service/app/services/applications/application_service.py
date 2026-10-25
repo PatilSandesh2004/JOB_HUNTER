@@ -38,7 +38,12 @@ from ai_service.app.services.tasks.runner import Handler, RetryLater, TaskFailed
 
 logger = logging.getLogger("jobpilot.applications")
 
-APPROVABLE = {ApplicationStatus.PENDING_APPROVAL, ApplicationStatus.NEEDS_INPUT, ApplicationStatus.NEEDS_MANUAL, ApplicationStatus.FAILED}
+APPROVABLE = {
+    ApplicationStatus.PENDING_APPROVAL,
+    ApplicationStatus.NEEDS_INPUT,
+    ApplicationStatus.NEEDS_MANUAL,
+    ApplicationStatus.FAILED,
+}
 IN_FLIGHT = {ApplicationStatus.PROCESSING, ApplicationStatus.SUBMITTING}
 MANUAL_STATUSES = {
     ApplicationStatus.SAVED,
@@ -230,6 +235,7 @@ class ApplicationService:
             raise ApplicationConflictError(f"Application is not waiting for input (status is {row.status})")
 
         from ai_service.app.schemas.screening import ScreeningAnswerWrite
+
         # Save to answer bank if requested
         if remember and answer.strip():
             await ScreeningAnswerRepository(session).upsert_many(
@@ -239,7 +245,7 @@ class ApplicationService:
         # Update the application's questions list
         remaining = [q for q in row.questions if q["label"] != label]
         events = [timeline_event("Answered question", f"Q: {label}\nA: {answer}")]
-        
+
         row = await repo.update(row, questions=remaining, events=events)
 
         # If all questions are answered, unpause the agent
